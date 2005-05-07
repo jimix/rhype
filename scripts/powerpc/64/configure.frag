@@ -152,6 +152,10 @@ EOF
 #define MACHINE_NAME_STRING "${machine_name_string}"
 EOF
 
+	cat >> confdefs.h <<\EOF
+#define MACHINE_MAPLE 1
+EOF
+
         ;;
       ppc64-970*-JS20 | ppc64-970*-js20)
 	CUSTOM_HW=js20_hw.o
@@ -159,6 +163,10 @@ EOF
 	MACHINE=js20
 	cat >> confdefs.h <<EOF
 #define MACHINE_NAME_STRING "${machine_name_string}"
+EOF
+
+	cat >> confdefs.h <<\EOF
+#define MACHINE_JS20 1
 EOF
 
         ;;
@@ -169,11 +177,19 @@ EOF
 #define MACHINE_NAME_STRING "${machine_name_string}"
 EOF
 
+	cat >> confdefs.h <<\EOF
+#define MACHINE_MAMBO 1
+EOF
+
         ;;
       ppc64-970*-mac)
         CUSTOM_HW=mac_hw.o
 	enable_openfw=yes
 	MACHINE=mac
+	cat >> confdefs.h <<\EOF
+#define MACHINE_APPLE 1
+EOF
+
         ;;
       ppc64-970*-metal)
         HW_QUIRKS=none
@@ -181,6 +197,10 @@ EOF
 	MACHINE=metal
 	cat >> confdefs.h <<EOF
 #define MACHINE_NAME_STRING "${machine_name_string}"
+EOF
+
+	cat >> confdefs.h <<\EOF
+#define MACHINE_METAL 1
 EOF
 
         ;;

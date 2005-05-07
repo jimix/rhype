@@ -128,28 +128,33 @@ case "${PLATFORM}" in
         IO_XLATE=io_xlate_u3.o
 	MACHINE=maple
 	AC_DEFINE_UNQUOTED(MACHINE_NAME_STRING, "${machine_name_string}")
+	AC_DEFINE(MACHINE_MAPLE)
         ;;
       ppc64-970*-JS20 | ppc64-970*-js20)
 	CUSTOM_HW=js20_hw.o
         IO_XLATE=io_xlate_u3.o
 	MACHINE=js20
 	AC_DEFINE_UNQUOTED(MACHINE_NAME_STRING, "${machine_name_string}")
+	AC_DEFINE(MACHINE_JS20)
         ;;
       ppc64-970*-mambo)
         CUSTOM_HW=mambo_hw.o
 	MACHINE=mambo
 	AC_DEFINE_UNQUOTED(MACHINE_NAME_STRING, "${machine_name_string}")
+	AC_DEFINE(MACHINE_MAMBO)
         ;;
       ppc64-970*-mac)
         CUSTOM_HW=mac_hw.o
 	enable_openfw=yes
 	MACHINE=mac
+	AC_DEFINE(MACHINE_APPLE)
         ;;
       ppc64-970*-metal)
         HW_QUIRKS=none
 	enable_openfw=no
 	MACHINE=metal
 	AC_DEFINE_UNQUOTED(MACHINE_NAME_STRING, "${machine_name_string}")
+	AC_DEFINE(MACHINE_METAL)
         ;;
       ppc64-970*)
         HW_QUIRKS=none
