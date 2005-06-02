@@ -730,66 +730,93 @@ pkg_save(void *mem)
 	return r;
 }
 
-static uval
-boot_fixup_of_refs(void *mem)
+static void
+of_walk_tree(phandle root, void (*fn)(phandle p, uval arg), uval arg)
 {
+	do {
+		phandle child = of_getchild(root);
+
+		fn(root, arg);
+
+		if (child != 0 && child != OF_FAILURE) {
+
+			of_walk_tree(child, fn, arg);
+		}
+
+		root = of_getpeer(root);
+	} while (root != 0 && root != OF_FAILURE);
+}
+
+struct fixup_args
+{
+	void *mem;
+	const char *props;
+};
+
+
+
+static void
+fixup_refs(phandle ph, uval arg)
+{
+	void *mem = (void*)arg;
+
 	static const char *fixup_props[] = {
-/* Apple FW has it right */
-#ifndef MACHINE_APPLE
 		"interrupt-parent",
-#endif
 		NULL,
 	};
+
 	uval i;
-	uval count = 0;
+	uval32 prop_buf[64];
 
 	for (i = 0; i < ARRAY_SIZE(fixup_props); i++) {
-		ofdn_t c;
 		const char *name = fixup_props[i];
+		ofdn_t ofd_ph;
+		ofdn_t ref;
+
+		phandle rp;
+		ofdn_t upd;
+		char path[256];
+		char ofpath[256];
+		sval32 rc;
+
 		if (!name) continue;
 
-		c = ofd_node_find_by_prop(mem, OFD_ROOT, name, NULL, 0);
-		while (c != OF_FAILURE) {
-			const char *path;
-			phandle rp;
-			sval32 ref;
-			ofdn_t dp;
-			sval32 rc;
-			ofdn_t upd;
-			char ofpath[256];
+		rc = of_package_to_path(ph, path, sizeof (ofpath));
+		assert(rc != OF_FAILURE, "no real device for: %x %s\n",
+		       ph, ofpath);
 
-			path = ofd_node_path(mem, c);
-			assert(path != NULL, "no path to found prop: %s\n",
-			       name);
+		rc = of_getprop(ph, name, prop_buf, sizeof(prop_buf));
+
+		if (rc <= 0) continue;
 
 
-			rp = of_finddevice(path);
-			assert(rp != OF_FAILURE,
-			       "no real device for: %s\n", path);
+		ofd_ph = ofd_node_find(mem, path);
+		assert(ofd_ph != OF_FAILURE, "no node for: %s\n", path);
 
-			rc = of_getprop(rp, name, &ref, sizeof(ref));
-			assert(rc != OF_FAILURE, "no prop: %s\n", name);
+		rp = *(phandle*)prop_buf;
+		rc = of_package_to_path(rp, ofpath, sizeof (ofpath));
+		assert(rc != OF_FAILURE, "no real device for: %x %s\n",
+		       rp, ofpath);
 
-			rc = of_package_to_path(ref, ofpath, sizeof (ofpath));
-			assert(rc != OF_FAILURE, "no package: %s\n", name);
+		ref = ofd_node_find(mem, ofpath);
+		assert(ref != OF_FAILURE, "no node for: %s\n", ofpath);
 
-			dp = ofd_node_find(mem, ofpath);
-			assert(dp != OF_FAILURE, "no node for: %s\n", ofpath);
 
-			ref = dp;
-
-			upd = ofd_prop_add(mem, c, name, &ref, sizeof(ref));
-			assert(upd != OF_FAILURE, "update failed: %s\n", name);
-#ifdef DEBUG
-			hprintf("%s: %s/%s -> %s\n", __func__,
-				path, name, ofpath);
-#endif
-			++count;
-			c = ofd_node_find_next(mem, c);
-		}
+		upd = ofd_prop_add(mem, ofd_ph, name, &ref, sizeof(ref));
+		assert(upd != OF_FAILURE, "update failed: %s\n", name);
 	}
-	return count;
 }
+
+static void
+boot_fixup_of_refs(void *mem)
+{
+	/* get root */
+	phandle root = 0;
+	sval r = call_of("peer", 1, 1, &root, 0);
+	assert(r == OF_SUCCESS, "OF peer for root failed\n");
+	of_walk_tree(root, fixup_refs, (uval)mem);
+}
+
 
 static uval
 boot_fixup_chosen(void *mem)
