@@ -185,6 +185,7 @@ EOF
       ppc64-970*-mac)
         CUSTOM_HW=mac_hw.o
 	enable_openfw=yes
+        IO_XLATE=io_xlate_u3.o
 	MACHINE=mac
 	cat >> confdefs.h <<\EOF
 #define MACHINE_APPLE 1

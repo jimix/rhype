@@ -146,6 +146,7 @@ case "${PLATFORM}" in
       ppc64-970*-mac)
         CUSTOM_HW=mac_hw.o
 	enable_openfw=yes
+        IO_XLATE=io_xlate_u3.o
 	MACHINE=mac
 	AC_DEFINE(MACHINE_APPLE)
         ;;

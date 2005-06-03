@@ -15,7 +15,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  *
- * $Id$
+ *$Id$
  */
 
 #include <types.h>
@@ -27,36 +27,42 @@
 #include <mmu.h>
 #include <hcall.h>
 
-
 void ofd_platform_probe(void* ofd)
 {
 	(void)ofd;
+	sval rc;
+	uval rets[1];
 
-	save_mmio_range(0xf0000000, 0x2000000, "PCI");
-	save_mmio_range(0xf2000000, 0x2000000, "HT");
-	save_mmio_range(0xf4000000, 0x400000, "HT");
+	save_mmio_range(0xf2000000, 0x02000000, "HT");
 
-	save_mmio_range(0xf8000000, 0x80000, "U3");
-	save_mmio_range(0xff800000, 0x80000, "ROM");
-	save_mmio_range(0xf9000000, 0x100000, "vsp");
+	/* U3 0x003fffff */
+	save_mmio_range(0xf4000000, 0x00017000, "U3");
 
-	save_mmio_range(0xfff04000, 0x4000, "NVRAM");
-	save_mmio_range(0x80000000, 0x80000, "macio");
+	/* bus3 EPROM */
+	save_mmio_range(0xa0000000, 0x00200000, "bus3");
 
-	save_mmio_range(0x90000000, 0x40000, "tg3");
-
-	/* G5's have a little-endian openpic */
-	ofd_openpic_probe(ofd, 1);
+	/* Maple has a big-endian openpic */
+	ofd_openpic_probe(ofd, 0);
 
 
+	/* define the bus to apply the dart too */
+	rc = hcall_pci_config(NULL, SET|CREATE, 0, 0, 0, 0);
+	assert(rc == H_Success, "Failed defining PCI bus\n");
+
+	uval lpid = 0x1001;
+	rc = hcall_pci_config(NULL, SET|GRANT, 0, lpid, 0, 0);
+	assert(rc == H_Success,
+	       "PCI grant: lpid[0x%lx] failed\n",
+	       lpid);
 	/* Define the ibm,dma-window corresponding to a complete DART */
-	uval32 ofd_pci_dma_window[] = { 0, 0, 0, 0, 0, 1<<31 };
-	const char device_tree[] = "device-tree";
+	uval32 ofd_pci_dma_window[] = { 0, 0, 0, 0, 0, 1 << 31 };
 
-	ofdn_t n = ofd_node_find_by_prop(ofd, -1, "name",
-					 device_tree, sizeof(device_tree));
-	if (n > 0)
+	rc = hcall_pci_config(NULL, SET|DMA_WIN, 0, 0, 0, 1 << 31);
+	assert(rc == H_Success, "Failed setting DMA window\n");
+
+	ofdn_t n = ofd_node_find(ofd, "ht");
+	if (n > 0) {
 		ofd_prop_add(ofd, n, "ibm,dma-window",
 			     &ofd_pci_dma_window, sizeof (ofd_pci_dma_window));
-
+	}
 }
