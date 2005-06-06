@@ -48,8 +48,22 @@ ofd_pci_range_register(struct of_pci_range64_s *r64,
 				       "Failed setting cfg spc\n");
 			}
 
+			/* On Apple we've got I/O space compact, so we
+			 * have to remember the ranges and define them
+			 * all later.  On other systems, they are
+			 * not compact and mya blow over the top of
+			 * the * logical address space.  Thus we
+			 * should make the hcall now, because only
+			 * now are we able to re-write the OF property
+			 * that contains these address values.
+			 */
+#ifdef MACHINE_APPLE
 			save_mmio_range(r[i].base, r[i].size, "PCI");
 			rets[0] = r[i].base;
+#else
+			rc = hcall_mem_define(rets, MMIO_ADDR,
+					      r[i].base, r[i].size);
+#endif
 
 		} else {
 			rc = hcall_resource_transfer(rets, MMIO_ADDR,
