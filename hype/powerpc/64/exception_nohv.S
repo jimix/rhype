@@ -124,6 +124,7 @@
 
 	LDR	r12, V_ACTIVE_AREA(r11)
 	addi	r12, r12, 1
+	tdeqi	r12, NUM_EXC_SAVES
 	andi.	r12, r12, NUM_EXC_SAVES - 1
 	mulli	r12, r12, VS_SIZE
 	add	r11, r12, r11
@@ -138,8 +139,10 @@
 	STR	r11, TCA_SAVE_AREA(r13)
 
 	mfsrr0	r12
+	STR	r12, VS_SRR0(r11)
 	STR	r12, TCA_SRR0(r13)
 	mfsrr1	r12
+	STR	r12, VS_SRR1(r11)
 	STR	r12, TCA_SRR1(r13)
 .endm
 
