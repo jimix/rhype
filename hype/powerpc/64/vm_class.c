@@ -219,6 +219,7 @@ vmc_activate(struct cpu_thread *thread, struct vm_class *vmc)
 	uval i = 0;
 
 	vmc_get(vmc);
+	return;
 
 	for (; i < SWSLB_SR_NUM; ++i) {
 		union slb_entry *se = &thread->slb_entries[i];

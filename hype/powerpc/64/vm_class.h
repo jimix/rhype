@@ -42,9 +42,9 @@ union vm_class_vsid
 	struct
 	{
 		uval64	_unused:27;
-		uval64	class_offset:12;
-		uval64	class_id:20;
-		uval64	lpid_id:5;
+		uval64	class_offset:VM_CLASS_BITS;
+		uval64	class_id:VM_CLASS_ID_BITS;
+		uval64	lpid_id:VM_CLASS_LPID_BITS;
 	}bits;
 	uval64 word;
 };
@@ -55,8 +55,17 @@ static inline uval vsid_class_id(uval64 vsid)
 	return x.bits.class_id;
 }
 
+static inline uval vsid_lpid_id(uval64 vsid)
+{
+	union vm_class_vsid x = { .word = vsid };
+	return x.bits.lpid_id;
+}
 
-#define VM_CLASS_SPACE_SIZE_BITS	40
+static inline uval vsid_class_offset(uval64 vsid)
+{
+	union vm_class_vsid x = { .word = vsid };
+	return x.bits.class_offset;
+}
 
 
 union linux_pte

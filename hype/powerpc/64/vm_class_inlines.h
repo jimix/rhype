@@ -51,13 +51,19 @@ static inline void
 vmc_cache_slbe(struct vm_class* vmc, uval vsid)
 {
 	uval i = 0;
-	uval cache_val = vsid & ((1 << VM_CLASS_BITS) - 1);
+	uval idx = VMC_SLB_CACHE_SIZE;
+	uval cache_val = vsid_class_offset(vsid);
 	for (;i < VMC_SLB_CACHE_SIZE; ++i) {
+		if (vmc->vmc_slb_cache[i] == cache_val) break;
 		if (vmc->vmc_slb_cache[i] != VMC_UNUSED_SLB_ENTRY) continue;
-		assert(vmc->vmc_slb_cache[i] != cache_val,
-		       "Entry already in cache\n");
-		vmc->vmc_slb_cache[i] = vsid & ((1 << VM_CLASS_BITS) - 1);
-		break;
+
+		if (i < idx) {
+			idx = i;
+		}
+
+	}
+	if (idx < VMC_SLB_CACHE_SIZE) {
+		vmc->vmc_slb_cache[i] = cache_val;
 	}
 }
 
