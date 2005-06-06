@@ -77,6 +77,9 @@ inval_slb_entry(uval index, union slb_entry *cache)
 			      "isync\n\t"::
 			      [esid_c] "r" (esid_c));
 	cache[index].bits.v = 0;
+	cache[index].words.esid = 0;
+	cache[index].words.vsid = 0;
+
 }
 
 
