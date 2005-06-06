@@ -40,14 +40,12 @@ h_vrfid(struct cpu_thread *thread, uval restore_idx, uval new_dec)
 	if (new_dec) {
 		partition_set_dec(thread, new_dec);
 	}
-//	hprintf("%s pc: 0x%lx msr: 0x%lx\n", __func__, vr->v_srr0, vr->v_srr1);
 
 	uval val = vr->v_srr1;
 	val |= V_LPAR_MSR_ON;
 	val &= ~V_LPAR_MSR_OFF;
 	tca->srr1 = val;
 	set_v_msr(thread, vr->v_srr1);
-	assert(vr->v_srr0, "jumping to 0\n");
 
 	tca->srr0 = vr->v_srr0;
 
