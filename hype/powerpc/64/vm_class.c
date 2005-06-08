@@ -145,31 +145,28 @@ struct vm_class*
 find_kernel_vmc(struct cpu_thread* thr, uval eaddr)
 {
 	struct os *os = thr->cpu->os;
-	int i = 0;
-	struct vm_class *vmc = NULL;
+	int i;
+	struct vm_class *vmc;
 	for (i = 0; i < NUM_KERNEL_VMC; ++i) {
 		vmc = os->vmc_kernel[i];
 		if (vmc == NULL) continue;
 		if (vmc->vmc_base_ea > eaddr) continue;
 		if (vmc->vmc_base_ea + vmc->vmc_size < eaddr) continue;
-		break;
+		return vmc;
 	}
 
-	if (i == NUM_KERNEL_VMC) {
-		if (eaddr > thr->vmc_vregs->vmc_base_ea) {
-			return thr->vmc_vregs;
-		}
-		return NULL;
+	if (eaddr > thr->vmc_vregs->vmc_base_ea) {
+		return thr->vmc_vregs;
 	}
 
-	return vmc;
+	return NULL;
 }
 
 struct vm_class*
 find_app_vmc(struct cpu_thread* thr, uval eaddr)
 {
-	int i = 0;
-	struct vm_class *vmc = NULL;
+	int i;
+	struct vm_class *vmc;
 	for (i = 0; i < NUM_MAP_CLASSES; ++i) {
 		vmc = thr->vstate.active_cls[i];
 		if (vmc == NULL) continue;
