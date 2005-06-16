@@ -171,23 +171,23 @@ extern int tlb_enter(struct partition_info *pi,
 		     uval eaddr, uval raddr, uval flags, uval8 l, uval8 ls);
 
 static __inline__ void
-tlbie(uval64 ea)
+tlbie(uval64 va)
 {
 	__asm__ __volatile__(
 			"tlbie %0"
 			: /* no outputs */
-			: "r"(ea)
+			: "r"(va)
 			: "memory"
 			);
 }
 
 static __inline__ void
-tlbie_large(uval64 ea)
+tlbie_large(uval64 va)
 {
 	__asm__ __volatile__(
 			"tlbie %0,1"
 			: /* no outputs */
-			: "r"(ea)
+			: "r"(va)
 			: "memory"
 			);
 }
@@ -209,6 +209,25 @@ static __inline__ void
 isync(void)
 {
 	__asm__ __volatile__("isync");
+}
+
+#ifndef ASM_PTESYNC
+#define ASM_PTESYNC __asm__ __volatile__("ptesync")
+#endif
+#ifndef ASM_TLBSYNC
+#define ASM_TLBSYNC __asm__ __volatile__("tlbsync")
+#endif
+/* These are not implemented in pu */
+static __inline__ void
+ptesync(void)
+{
+	ASM_PTESYNC;
+}
+
+static __inline__ void
+tlbsync(void)
+{
+	ASM_TLBSYNC;
 }
 
 /* cache */
