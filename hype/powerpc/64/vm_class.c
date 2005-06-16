@@ -76,39 +76,6 @@ vmc_destroy(struct cpu_thread *thr, struct vm_class *vmc)
 
 
 static uval
-vmc_vregs_xlate(struct vm_class *vmc, uval eaddr, union ptel *pte)
-{
-	(void)eaddr;
-
-	pte->word = 0;
-	pte->bits.rpn = vmc->vmc_data >> LOG_PGSIZE;
-	pte->bits.m = 1;
-	pte->bits.pp0 = PP_RWRW & 1;
-	pte->bits.pp1 = PP_RWRW >> 1;
-
-	return INVALID_LOGICAL_ADDRESS;
-}
-
-struct vm_class_ops vmc_vregs_ops =
-{
-	.vmc_xlate = vmc_vregs_xlate,
-};
-
-
-struct vm_class*
-vmc_create_vregs(void)
-{
-	struct vm_class* vmc = halloc(sizeof(*vmc));
-	if (!vmc) return NULL;
-
-	vmc_init(vmc, ~0ULL, VREG_BASE, PGSIZE, &vmc_vregs_ops);
-	vmc->vmc_data = (uval)halloc(PGSIZE);
-	return vmc;
-}
-
-
-
-static uval
 vmc_linear_xlate(struct vm_class *vmc, uval eaddr, union ptel *pte)
 {
 	uval la = (eaddr - vmc->vmc_base_ea) + vmc->vmc_data;
@@ -342,7 +309,7 @@ vmc_reflect_op(struct vm_class *vmc, struct cpu_thread* thread,
 }
 
 
-struct vm_class_ops vmc_reflect_ops =
+static struct vm_class_ops vmc_reflect_ops =
 {
 	.vmc_xlate = NULL,
 	.vmc_op = vmc_reflect_op,

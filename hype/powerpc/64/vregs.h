@@ -17,6 +17,11 @@
  *
  * $Id$
  */
+
+#ifndef FORCE_APPLE_MODE
+#define __HYPE_VREGS_H
+#endif
+
 #ifndef __HYPE_VREGS_H
 #define __HYPE_VREGS_H
 
@@ -27,7 +32,9 @@
 #define VSTATE_ACTIVE_DEC	0x2
 #define VSTATE_PENDING_DEC	0x4
 #define VSTATE_PENDING_EXT	0x8
-#define VSTATE_FORCE_EXCEPTION 0x10
+#define VSTATE_FORCE_EXCEPTION	0x10
+#define VSTATE_DISABLED		0x20
+#define VSTATE_MER		0x40
 #define VSTATE_PENDING		(VSTATE_PENDING_EXT | VSTATE_PENDING_DEC)
 
 
@@ -55,6 +62,10 @@ extern void set_v_msr(struct cpu_thread* thr, uval val);
 
 extern sval insert_exception(struct cpu_thread *thread, uval exnum);
 extern sval insert_debug_exception(struct cpu_thread *thread, uval dbgflag);
+extern uval32 fetch_instruction(struct cpu_thread *thread, uval addr);
+
+extern sval deliver_async_exception(struct cpu_thread *thread);
+
 
 #endif
 

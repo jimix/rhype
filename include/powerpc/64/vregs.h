@@ -21,6 +21,7 @@
 #define __VREGS_H
 
 #define VREG_BASE	(ULL(0) - ULL(0x1000))
+#define VREG_PROTECTED_BASE	(VREG_BASE - ULL(0x1000))
 
 #define NUM_MAP_CLASSES	8
 #define NUM_EXC_VECTORS	16

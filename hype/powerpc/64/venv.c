@@ -35,6 +35,7 @@
 #include <vdec.h>
 #include <vm.h>
 #include <bitmap.h>
+#include <cpu_thread_inlines.h>
 
 sval xh_kern_prog_ex(struct cpu_thread* thread, uval addr);
 
@@ -44,23 +45,23 @@ set_v_msr(struct cpu_thread* thr, uval val)
 	if ((val ^ thr->vregs->v_msr) & MSR_PR) {
 		if (val & MSR_PR) {
 			vmc_exit_kernel(thr);
-			clear_bit(thr->vstate.thread_mode, VSTATE_KERN_MODE);
+			clear_vmode_bit(thr, VSTATE_KERN_MODE);
 		} else {
 			vmc_enter_kernel(thr);
-			set_bit(thr->vstate.thread_mode, VSTATE_KERN_MODE);
+			set_vmode_bit(thr, VSTATE_KERN_MODE);
 		}
 	}
 
+	uval ee = val & MSR_EE;
 	thr->vregs->v_msr = (val & ~(MSR_HV|(MSR_SF>>2))) | MSR_AM;
-	assert(thr->vregs->v_msr != 0x2900, "bad msr\n");
 
-	if (! test_bit(thr->vregs->v_msr, MSR_EE)) {
-		clear_bit(thr->vstate.thread_mode, VSTATE_FORCE_EXCEPTION);
+	if (!ee) {
+		clear_vmode_bit(thr, VSTATE_FORCE_EXCEPTION);
 		return;
 	}
 
-	if (test_bit(thr->vstate.thread_mode, VSTATE_PENDING)) {
-		set_bit(thr->vstate.thread_mode, VSTATE_FORCE_EXCEPTION);
+	if (test_vmode_bit(thr, VSTATE_PENDING)) {
+		set_vmode_bit(thr, VSTATE_FORCE_EXCEPTION);
 	}
 }
 
@@ -250,17 +251,11 @@ decode_spr_ins(struct cpu_thread* thr, uval addr, uval32 ins)
 	return ret;
 }
 
-sval
-xh_kern_prog_ex(struct cpu_thread* thread, uval addr)
+
+uval32
+fetch_instruction(struct cpu_thread *thread, uval addr)
 {
-	uval32 ins;
-	struct thread_control_area *tca = get_tca();
-
-	sval ret = 0;
-	uval srr1 = tca->srr1;
-
-	if (! (srr1 & (1ULL << (63-45)))) goto abort;
-
+	uval32 ins = 0;
 	struct vm_class *vmc = find_kernel_vmc(thread, addr);
 	if (!vmc) goto abort;
 
@@ -274,6 +269,26 @@ xh_kern_prog_ex(struct cpu_thread* thread, uval addr)
 
 	ins = *(uval32*)pa;
 
+abort:
+	return ins;
+
+}
+
+
+sval
+xh_kern_prog_ex(struct cpu_thread* thread, uval addr)
+{
+	uval32 ins;
+	struct thread_control_area *tca = get_tca();
+
+	sval ret = 0;
+	uval srr1 = tca->srr1;
+
+	if (! (srr1 & (1ULL << (63-45)))) goto abort;
+
+	ins = fetch_instruction(thread, addr);
+	if (ins == 0) goto abort;
+
 	ret = decode_spr_ins(thread, addr, ins);
 	if (ret == 0) return -1;
 abort:
@@ -281,22 +296,26 @@ abort:
 }
 
 
-extern sval deliver_async_exception(struct cpu_thread *thread);
-
 sval
 deliver_async_exception(struct cpu_thread *thread)
 {
-	uval *mode = &thread->vstate.thread_mode;
-	if (test_bit(*mode, VSTATE_PENDING_EXT)) {
-		clear_bit(*mode, VSTATE_PENDING_EXT);
-		return insert_exception(thread, EXC_V_EXT);
-	}
-	if (test_bit(*mode, VSTATE_PENDING_DEC)) {
-		clear_bit(*mode, VSTATE_PENDING_DEC);
-		return insert_exception(thread, EXC_V_DEC);
+	sval ret = -1;
+
+	if (test_vmode_bit(thread, VSTATE_PENDING_EXT)) {
+		/* Ordering is important so as to handle MER emulation.
+		 * Clear the PENDING bits only after the new msr has been set
+		 */
+		ret = insert_exception(thread, EXC_V_EXT);
+		clear_vmode_pending(thread, VSTATE_PENDING_EXT);
+	} else if (test_vmode_bit(thread, VSTATE_PENDING_DEC)) {
+		/* Ordering is important so as to handle MER emulation.
+		 * Clear the PENDING bits only after the new msr has been set
+		 */
+		ret = insert_exception(thread, EXC_V_DEC);
+		clear_vmode_pending(thread, VSTATE_PENDING_DEC);
 	}
 
-	return -1;
+	return ret;
 }
 
 
@@ -307,6 +326,8 @@ insert_exception(struct cpu_thread *thread, uval exnum)
 	struct vregs* vregs = tca->vregs;
 	struct vexc_save_regs* vr = tca->save_area;
 
+	assert(exnum!=EXC_V_EXT || vregs->active_vsave<5,
+	       "catch\n");
 
 //	hprintf("Reflect exception: %ld %x\n", exnum, vr->exc_num);
 	if (!thread->vregs->exception_vectors[exnum])
@@ -323,7 +344,7 @@ insert_exception(struct cpu_thread *thread, uval exnum)
 	/* Provide accurate trap bits */
 	vr->v_srr1 = vregs->v_msr | (MSR_TRAP_BITS & tca->srr1);
 	assert(vr->v_srr1 != 0x2900, "bad msr\n");
-	
+
 	/* enforce HV, EE, PR off, AM on */
 	uval vmsr = vregs->v_msr;
 
@@ -332,20 +353,28 @@ insert_exception(struct cpu_thread *thread, uval exnum)
 	vmsr |= MSR_SF;
 //	hprintf("v_msr: 0x%016lx v_ex_msr: 0x%016lx %ld\n",
 //		vregs->v_msr, vmsr, exnum);
+	uval64 msr = vregs->v_ex_msr;
+
+	if (exnum == EXC_V_DEBUG) {
+		vmsr |= MSR_FP;
+		msr |= MSR_FP;
+	}
+
 	set_v_msr(thread, vmsr);
 
-	uval64 msr = vregs->v_ex_msr;
 	msr |= V_LPAR_MSR_ON;
 	msr &= ~V_LPAR_MSR_OFF;
 	tca->srr1 = msr;
 	tca->srr0 = vregs->exception_vectors[exnum];
-	
+
 	/* Make vregs->v_dec match current dec value */
 	sync_from_dec();
 
 
 	vr->prev_vsave = vregs->active_vsave;
 	vregs->active_vsave = (vr - &vregs->vexc_save[0]);
+	assert(vr->prev_vsave == 0 || vr->prev_vsave < vregs->active_vsave,
+		"vsave problem");
 
 	return vregs->active_vsave;
 }

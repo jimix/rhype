@@ -33,9 +33,9 @@
 #include <hash.h>
 #include <cpu_thread.h>
 
-#define VM_CLASS_LPID_BITS	5
+#define VM_CLASS_LPID_BITS	4
 #define VM_CLASS_ID_BITS	20
-#define VM_CLASS_BITS		12
+#define VM_CLASS_BITS		13
 #define VM_CLASS_SIZE	(1ULL << (VM_CLASS_BITS + LOG_SEGMENT_SIZE))
 union vm_class_vsid
 {
@@ -106,6 +106,13 @@ struct vm_class_ops
 	/* If logical address is invalid, and pte is non-zero, then
 	 * pte contains physical address. Pte is initially 0. */
 	uval (*vmc_xlate)(struct vm_class *vmc, uval eaddr, union ptel *pte);
+
+	/* If a VM class has this method, it becomes totally responsible
+	 * for processing the rest of the page-table miss.
+	 */
+	uval (*vmc_exception)(struct vm_class *vmc, struct cpu_thread *thr,
+			      struct vexc_save_regs *vr, uval eaddr);
+
 	sval (*vmc_op)(struct vm_class *vmc, struct cpu_thread *thr,
 		       uval arg1, uval arg2, uval arg3, uval arg4);
 	void (*vmc_dealloc)(struct vm_class *vmc);
@@ -134,7 +141,7 @@ struct vm_class {
 extern uval vmc_init(struct vm_class *vmc, uval id, uval base, uval size,
 		     struct vm_class_ops *ops);
 
-extern struct vm_class* vmc_create_vregs(void);
+extern struct vm_class* vmc_create_vregs(struct cpu_thread *thr);
 
 extern struct vm_class* vmc_create_linear(uval id, uval base, uval size,
 					  uval offset);
@@ -161,5 +168,9 @@ extern void vmc_activate(struct cpu_thread *thread, struct vm_class *vmc);
 extern sval htab_purge_vsid(struct cpu_thread *thr, uval vsid, uval num_vsids);
 extern sval insert_ea_map(struct cpu_thread *thr, uval vsid,
 			  uval ea, uval valid, union ptel pte);
+
+extern union pte* __insert_ea_map(struct cpu_thread *thr, uval vsid, uval ea,
+				  uval valid, uval bolted, union ptel entry);
+
 
 #endif /* _POWERPC_64_VM_CLASS_H */

@@ -124,7 +124,7 @@
 
 	LDR	r12, V_ACTIVE_AREA(r11)
 	addi	r12, r12, 1
-	tdeqi	r12, NUM_EXC_SAVES
+	tdeqi	r12, NUM_EXC_SAVES-1
 	andi.	r12, r12, NUM_EXC_SAVES - 1
 	mulli	r12, r12, VS_SIZE
 	add	r11, r12, r11
@@ -528,19 +528,19 @@ fire_hdec:
 	SAVE_R11_R13_TO_BUFFER r10, CT_GPRS, r12
 	SAVE_GPRS_TO_BUFFER r14, r31, CT_GPRS, r12
 
+	li	r4, 1
+
+preempt_save:	
 	/* cr is saved very early on into vregs */
-	lwz	r4, VS_CR(r11)
+	lwz	r7, VS_CR(r11)
 
 	LDR	r5, TCA_SRR0(r13)
+	LDR	r6, TCA_SRR1(r13)
 
-	LDR	r6, TCA_VREGS(r13)
-	LDR	r6, V_MSR(r6)
-
-	stw	r4, CT_CR(r12)
+	stw	r7, CT_CR(r12)
 	STR	r5, CT_HSRR0(r12)
 	STR	r6, CT_HSRR1(r12)
 
-	li	r4, 1
 	mr	r3, r12
 	LDR	r1, TCA_HYPE_STACK(r13) 	/* get stack pointer */
 
@@ -550,15 +550,18 @@ fire_hdec:
 	/* We don't come back here */
 	b	.
 			
-save_all:	
+save_all:
+	trap
+	LDR	r12, TCA_CPU_THREAD(r13)
+	LDR	r11, TCA_SAVE_AREA(r13)
+	
 	/* preempt this OS */
 	SAVE_GPRS_TO_BUFFER r14, r31, CT_GPRS, r4
 
 	LDR	r15, TCA_SRR0(r13)
 	STR	r15, CT_HSRR0(r4)
 
-	LDR	r15, TCA_VREGS(r13)
-	LDR	r15, V_MSR(r15)
+	LDR	r15, TCA_SRR1(r13)
 	STR	r15, CT_HSRR1(r4)
 
         mr	r3, r4

@@ -23,6 +23,8 @@
 
 #include <cpu_thread.h>
 
+#include <vregs.h>
+
 #if !defined(HAS_MEDIATED_EE) && !defined(FORCE_APPLE_MODE)
 /* Mediated interrupts not implemented */
 static inline uval
@@ -35,13 +37,68 @@ thread_set_MER(struct cpu_thread *thr, uval val)
 #endif
 
 #ifdef FORCE_APPLE_MODE
+
+
+extern void __thread_set_MER(struct cpu_thread *thr);
+
+static inline uval
+test_vmode_bit(struct cpu_thread* thr, uval bit)
+{
+	return test_bit(thr->vstate.thread_mode, bit);
+}
+
+static inline uval is_MER_active(struct cpu_thread *thr)
+{
+	return (test_bit(thr->vregs->v_msr, MSR_EE) == 0)
+		&& test_vmode_bit(thr, VSTATE_PENDING);
+}
+
+static inline uval
+set_vmode_bit(struct cpu_thread* thr, uval bit)
+{
+	set_bit(thr->vstate.thread_mode, bit);
+	return thr->vstate.thread_mode;
+}
+
+/* Use this for any VSTATE_PENDING_* bits */
+static inline uval
+set_vmode_pending(struct cpu_thread* thr, uval bit)
+{
+	uval old_mer = is_MER_active(thr);
+	uval ret = set_vmode_bit(thr, bit);
+	if (old_mer ^ is_MER_active(thr)) {
+		__thread_set_MER(thr);
+	}
+	return ret;
+}
+
+static inline uval
+clear_vmode_bit(struct cpu_thread* thr, uval bit)
+{
+	return clear_bit(thr->vstate.thread_mode, bit);
+}
+
+
+
+/* Use this for any VSTATE_PENDING_* bits */
+static inline uval
+clear_vmode_pending(struct cpu_thread* thr, uval bit)
+{
+	uval old_mer = is_MER_active(thr);
+	uval ret = clear_vmode_bit(thr, bit);
+	if (old_mer ^ is_MER_active(thr)) {
+		__thread_set_MER(thr);
+	}
+	return ret;
+}
+
 static inline uval
 thread_set_MER(struct cpu_thread *thr, uval val)
 {
 	if (val) {
-		thr->vstate.thread_mode |= VSTATE_PENDING_EXT;
+		set_vmode_pending(thr, VSTATE_PENDING_EXT);
 	} else {
-		thr->vstate.thread_mode &= ~VSTATE_PENDING_EXT;
+		clear_vmode_pending(thr, VSTATE_PENDING_EXT);
 	}
 	return 0;
 }

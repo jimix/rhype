@@ -202,6 +202,13 @@ check_and_deliver_externals(struct cpu_thread *thread)
 
 	thread->reg_hsrr1 = srr1_set_sf(thread->reg_hsrr1);
 #else
+	if (!(thread->vregs->v_msr & MSR_EE)) {
+		/* defer the delivery */
+		thread_set_MER(thread, 1);
+		return external_present;
+	}
+
+
 	insert_exception(thread, EXC_V_EXT);
 	thread->reg_hsrr0 = get_tca()->srr0;
 	thread->reg_hsrr1 = get_tca()->srr1;

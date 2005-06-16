@@ -34,15 +34,22 @@ test_bit(uval mask, uval bit)
 	return mask & bit;
 }
 
-#define clear_bit(mask, bit)						\
-	do {								\
-		(mask) &= ~(bit);					\
-	} while (0);
+static inline uval __clear_bit(uval *mask, uval bit)
+{
+	*mask &= ~bit;
+	return *mask;
+}
 
-#define set_bit(mask, bit)						\
-	do {								\
-		(mask) |= (bit);					\
-	} while (0);
+#define clear_bit(mask, bit) __clear_bit(&(mask), bit)
+
+
+static inline uval __set_bit(uval *mask, uval bit)
+{
+	*mask |= bit;
+	return *mask;
+}
+
+#define set_bit(mask, bit) __set_bit(&(mask), bit)
 
 
 

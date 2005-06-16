@@ -35,7 +35,7 @@
 #include <vdec.h>
 #include <vm.h>
 #include <bitmap.h>
-
+#include <htab_inlines.h>
 
 #define FORCE_4K_PAGES 1
 
@@ -48,7 +48,7 @@ vbase_config(struct cpu_thread* thr, uval vbase, uval size)
 	thr->vbl = size;
 
 	struct vm_class *vmc;
-	thr->vmc_vregs = vmc_create_vregs();
+	thr->vmc_vregs = vmc_create_vregs(thr);
 
 
 	thr->vregs = (struct vregs*)thr->vmc_vregs->vmc_data;
@@ -96,6 +96,7 @@ htab_purge_vsid(struct cpu_thread *thr, uval vsid, uval num_vsids)
 	for (; i < end; ++i) {
 		/* vsid is 52 bits, avpn has 57 */
 		uval pte_vsid = ht[i].bits.avpn >> 5;
+
 		if (ht[i].bits.v == 0 || pte_vsid - vsid >= num_vsids) {
 			continue;
 		}
@@ -106,10 +107,9 @@ htab_purge_vsid(struct cpu_thread *thr, uval vsid, uval num_vsids)
 			continue;
 		}
 
-		pte_invalidate(&thr->cpu->os->htab, &ht[i]);
+		uval vpn = vpn_from_pte(&ht[i], i >> LOG_NUM_PTES_IN_PTEG);
+		htab_entry_modify(&ht[i], vpn, NULL);
 		pte_unlock(&ht[i]);
-		ptesync();
-		do_tlbie(&ht[i], i);
 	}
 	return H_Success;
 }
@@ -125,11 +125,25 @@ sval
 insert_ea_map(struct cpu_thread *thr, uval vsid, uval ea, uval valid,
 	      union ptel entry)
 {
+	union pte* ret = __insert_ea_map(thr, vsid, ea, valid, 0, entry);
+	assert(ret , "PTE insertion failure\n");
+
+	return H_Success;
+}
+
+
+
+union pte*
+__insert_ea_map(struct cpu_thread *thr, uval vsid, uval ea, uval valid,
+		uval bolted, union ptel entry)
+{
 	int j = 0;
 	uval lp = LOG_PGSIZE;  /* FIXME: get large page size */
-	uval vaddr = (vsid << LOG_SEGMENT_SIZE) | (ea & (SEGMENT_SIZE - 1));
 	uval log_ht_size = bit_log2(thr->cpu->os->htab.num_ptes)+ LOG_PTE_SIZE;
-	uval pteg = NUM_PTES_IN_PTEG * get_pteg(vaddr, vsid, lp, log_ht_size);
+
+	uval vpn = vpn_from_vsid_ea(vsid, ea);
+	uval pteg = NUM_PTES_IN_PTEG * get_pteg(vpn << LOG_PGSIZE,
+						vsid, lp, log_ht_size);
 
 	union pte *ht = (union pte *)GET_HTAB(thr->cpu->os);
 	union pte pte;
@@ -137,16 +151,33 @@ insert_ea_map(struct cpu_thread *thr, uval vsid, uval ea, uval valid,
 	pte.words.vsidWord = 0;
 	pte.words.rpnWord = entry.word;
 
-	pte.bits.avpn = (vsid << 5) | VADDR_TO_API(vaddr);
+	pte.bits.avpn = (vsid << 5) | VADDR_TO_API(vpn << LOG_PGSIZE);
 	pte.bits.v = valid;
+	pte.bits.bolted = bolted;
 
-	union pte *target = &ht[pteg];
-	int empty = NUM_PTES_IN_PTEG;
-	uval remove = 0;
-
+	union pte *target;
+	int empty;
+	uval remove;
+	uval verbose = 0;
 redo_search:
 
+	j = 0;
+
+	empty = NUM_PTES_IN_PTEG;
+	remove = 0;
+	target = &ht[pteg];
+
 	for (; j < NUM_PTES_IN_PTEG; ++j, ++target) {
+		if (verbose) {
+			uval x = vpn_from_pte(target, pteg);
+
+			uval v = x >> (LOG_SEGMENT_SIZE - LOG_PGSIZE);
+			hprintf("PTE for: 0x%lx/0x%lx/0x%lx 0x%lx\n",
+				vsid_lpid_id(v),
+				vsid_class_id(v),
+				vsid_class_offset(v), x);
+		}
+
 		if (target->bits.avpn == pte.bits.avpn) {
 			empty = j;
 			remove = 1;
@@ -159,7 +190,11 @@ redo_search:
 	}
 
 	if (empty == NUM_PTES_IN_PTEG) {
-		assert(empty != NUM_PTES_IN_PTEG, "Full htab\n");
+		if (verbose) {
+			assert(empty != NUM_PTES_IN_PTEG, "Full htab\n");
+		}
+		verbose = 1;
+
 		record_eviction(&ht[pteg]);
 		goto redo_search;
 	}
@@ -173,22 +208,18 @@ redo_search:
 		goto redo_search;
 
 
-	if (remove) {
-		pte_invalidate(&thr->cpu->os->htab, target);
-		ptesync();
-		do_tlbie(target, pteg + empty);
+	pte.bits.lock = 0;
+
+	/* Modify and unlock */
+	htab_entry_modify(target, vpn, &pte);
+
+	/* Above call doesn't unlock if pte.bits.v == 0 */
+	if (!valid) {
+		pte_unlock(target);
 	}
 
-//	hprintf("insert: ea: 0x%lx vsid: 0x%lx -> idx: 0x%lx\n",
-//		ea, vsid, j + pteg);
-	if (pte.bits.v) {
-		pte.bits.lock = 1; /* Make sure new entry is still locked */
-		pte_insert(&thr->cpu->os->htab, empty + pteg,
-			   pte.words.vsidWord, pte.words.rpnWord, ea);
-	}
-	pte_unlock(target);
 
-	return H_Success;
+	return target;
 }
 
 
@@ -205,7 +236,6 @@ xh_kern_pgflt(struct cpu_thread* thr, uval type, struct vexc_save_regs *vr)
 		orig_addr = tca->srr0;
 	}
 
-
 	if (thr->vstate.thread_mode & VSTATE_KERN_MODE) {
 		vmc = find_kernel_vmc(thr, orig_addr);
 	}
@@ -219,6 +249,10 @@ xh_kern_pgflt(struct cpu_thread* thr, uval type, struct vexc_save_regs *vr)
 		breakpoint();
 
 		return insert_debug_exception(thr, V_DEBUG_MEM_FAULT);
+	}
+
+	if (vmc->vmc_ops->vmc_exception) {
+		return vmc->vmc_ops->vmc_exception(vmc, thr, vr, orig_addr);
 	}
 
 	uval addr = ALIGN_DOWN(orig_addr, PGSIZE);

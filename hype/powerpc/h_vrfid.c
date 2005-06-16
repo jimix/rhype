@@ -27,7 +27,7 @@
 #include <vregs.h>
 #include <vdec.h>
 #include <thread_control_area.h>
-
+#include <cpu_thread_inlines.h>
 
 sval
 h_vrfid(struct cpu_thread *thread, uval restore_idx, uval new_dec)
@@ -45,6 +45,7 @@ h_vrfid(struct cpu_thread *thread, uval restore_idx, uval new_dec)
 	val |= V_LPAR_MSR_ON;
 	val &= ~V_LPAR_MSR_OFF;
 	tca->srr1 = val;
+
 	set_v_msr(thread, vr->v_srr1);
 
 	tca->srr0 = vr->v_srr0;

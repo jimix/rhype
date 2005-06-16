@@ -29,6 +29,7 @@
 #include <thread_control_area.h>
 #include <objalloc.h>
 #include <vdec.h>
+#include <cpu_thread_inlines.h>
 
 inline void
 sync_from_dec(void)
@@ -85,7 +86,7 @@ partition_set_dec(struct cpu_thread *thr, uval32 val)
 		val = -1;
 	} else {
 		/* Positive decrementer, clear dec exception */
-		thr->vstate.thread_mode &= ~VSTATE_PENDING_DEC;
+		clear_vmode_pending(thr, VSTATE_PENDING_DEC);
 	}
 
 	thr->vdec = val;
@@ -103,11 +104,11 @@ xh_dec(struct cpu_thread *thread)
 	partition_set_dec(thread, -1);
 
 	if ( test_bit(tca->vregs->v_msr, MSR_EE) == 0) {
-		set_bit(thread->vstate.thread_mode, VSTATE_PENDING_DEC);
+		set_vmode_pending(thread, VSTATE_PENDING_DEC);
 		return -1; /* asm code knows to restore silently */
 	}
 
-	thread->vstate.thread_mode &= ~VSTATE_PENDING_DEC;
+	clear_vmode_pending(thread, VSTATE_PENDING_DEC);
 
 	return insert_exception(thread, EXC_V_DEC);
 
