@@ -60,10 +60,6 @@ C_TEXT_ENTRY(resume_thread_asm)
 	LDR r4, CT_HSRR0(r14)
 	LDR r5, CT_HSRR1(r14)
 #ifdef FORCE_APPLE_MODE
-	LOADCONST(r6, V_LPAR_MSR_ON)
-	LOADCONST(r7, ~V_LPAR_MSR_OFF)
-	or	r5, r5, r6
-	and	r5, r5, r7
 	mtspr	SPRN_SRR0, r4
 	mtspr	SPRN_SRR1, r5
 #else
