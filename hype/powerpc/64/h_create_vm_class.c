@@ -64,7 +64,7 @@ h_create_vm_class(struct cpu_thread* thread,
 
 	if (!vmc) goto done;
 
-	hprintf("%s %ld ea: 0x%lx\n", __func__, id, ea_base);
+	/* hprintf("%s %ld ea: 0x%lx\n", __func__, id, ea_base);*/
 	if (id < NUM_KERNEL_VMC) {
 		if (!cas_ptr(&thread->cpu->os->vmc_kernel[id], NULL, vmc)) {
 			assert(!thread->cpu->os->vmc_kernel[id],

@@ -37,7 +37,7 @@ h_destroy_vm_class(struct cpu_thread* thread, uval id)
 
 	struct vm_class *vmc = NULL;
 
-	hprintf("%s %ld\n", __func__, id);
+	/* hprintf("%s %ld\n", __func__, id); */
 	lock_acquire(&thread->cpu->os->po_mutex);
 
 	vmc = vmc_lookup(thread, id);
