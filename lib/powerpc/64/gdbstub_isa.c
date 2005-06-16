@@ -176,9 +176,51 @@ gdb_read_register(struct cpu_state *state, int id)
 		write_to_packet_hex(state->gpr[id],
 				    sizeof(state->gpr[id]) * 2);
 		break;
-	case 32 ... 63:
-		write_to_packet_hex(0, sizeof (uval64) * 2);
-		break;
+
+#define GET_FP_REG(i)							\
+	case i :{							\
+		uval64 reg;						\
+		register uval64 *preg asm("r10");			\
+		preg = &reg;						\
+		asm volatile ("stfd %1, 0(%0)\n\t"			\
+			      :: "g" (preg), "i" (i-32));		\
+		write_to_packet_hex(reg, sizeof (uval64) * 2);		\
+		break;							\
+		}							\
+
+	GET_FP_REG(32);
+	GET_FP_REG(33);
+	GET_FP_REG(34);
+	GET_FP_REG(35);
+	GET_FP_REG(36);
+	GET_FP_REG(37);
+	GET_FP_REG(38);
+	GET_FP_REG(39);
+	GET_FP_REG(40);
+	GET_FP_REG(41);
+	GET_FP_REG(42);
+	GET_FP_REG(43);
+	GET_FP_REG(44);
+	GET_FP_REG(45);
+	GET_FP_REG(46);
+	GET_FP_REG(47);
+	GET_FP_REG(48);
+	GET_FP_REG(49);
+	GET_FP_REG(50);
+	GET_FP_REG(51);
+	GET_FP_REG(52);
+	GET_FP_REG(53);
+	GET_FP_REG(54);
+	GET_FP_REG(55);
+	GET_FP_REG(56);
+	GET_FP_REG(57);
+	GET_FP_REG(58);
+	GET_FP_REG(59);
+	GET_FP_REG(60);
+	GET_FP_REG(61);
+	GET_FP_REG(62);
+	GET_FP_REG(63);
+
 	case 64:
 		write_to_packet_hex(state->pc, sizeof (state->pc) * 2);
 		break;
