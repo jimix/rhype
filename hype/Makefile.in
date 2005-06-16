@@ -116,6 +116,7 @@ APPLE_MODE= @ENABLE_APPLE_MODE@
 ifeq ($(APPLE_MODE),yes)
 OBJECTS += exception_nohv.o vbase.o h_set_spr.o vm_class.o h_create_vm_class.o
 OBJECTS += venv.o
+OBJECTS += vregs.o
 OBJECTS += h_vm_class_op.o
 OBJECTS += vmc_table.o
 OBJECTS += vdec.o
