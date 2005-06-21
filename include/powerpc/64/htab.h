@@ -26,7 +26,6 @@
 #include <atomic.h>
 #include_next <htab.h>
 
-#include <mmu.h>
 #include <mmu_defs.h>
 #include <bitmap.h>
 #define SDR1_HTABORG_MASK	0xfffffffffff80000ULL
