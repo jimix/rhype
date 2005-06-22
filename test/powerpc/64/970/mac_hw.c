@@ -42,6 +42,7 @@ void ofd_platform_probe(void* ofd)
 
 	save_mmio_range(0xfff04000, 0x4000, "NVRAM");
 	save_mmio_range(0x80000000, 0x80000, "macio");
+	save_mmio_range(0x80600000, 0x10000, "k2-sata");
 
 	save_mmio_range(0x90000000, 0x40000, "tg3");
 
