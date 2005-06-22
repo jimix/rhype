@@ -36,7 +36,9 @@
 #include <vm.h>
 #include <bitmap.h>
 #include <htab_inlines.h>
-
+#include <lpidtag.h>
+#include <debug.h>
+#include <counter.h>
 #define FORCE_4K_PAGES 1
 
 sval
@@ -116,9 +118,27 @@ htab_purge_vsid(struct cpu_thread *thr, uval vsid, uval num_vsids)
 
 
 static void
-record_eviction(union pte *entry)
+vm_class_evict_pte(union pte *entry, uval pteg)
 {
-	(void)entry;
+	uval vpn = vpn_from_pte(entry, pteg);
+	uval vsid = vpn >> (LOG_SEGMENT_SIZE - LOG_PGSIZE);
+	uval class = vsid_class_id(vsid);
+	uval lpid_tag = vsid_lpid_id(vsid);
+	struct os *os = lpidtag_to_os(lpid_tag);
+	struct cpu_thread *curr = get_tca()->active_thread;
+	struct cpu_thread *target = find_colocated_thread(curr, os);
+
+	hit_counter(HCNT_HPTE_EVICT);
+
+	/* If no thread found we could just blow it away? */
+	assert(target, "No matching thread found\n");
+
+	struct vm_class* vmc = vmc_lookup(target, class);
+	assert(vmc, "No vmc found for PTE entry\n");
+
+	atomic_add32(&vmc->vmc_num_ptes,(uval32)-1);
+
+	vmc_put(vmc);
 }
 
 sval
@@ -195,18 +215,20 @@ redo_search:
 		}
 		verbose = 1;
 
-		record_eviction(&ht[pteg]);
-		goto redo_search;
+		/* random eviction? */
+		empty = mftb() & (NUM_PTES_IN_PTEG-1);
+		target = &ht[pteg + empty];
+		pte_lock(target);
+
+		vm_class_evict_pte(target, pteg);
+	} else {
+		target = &ht[pteg + empty];
+		pte_lock(target);
+
+		/* Things may have changed since we got the lock */
+		if (target->bits.v && target->bits.avpn != pte.bits.avpn)
+			goto redo_search;
 	}
-
-
-	target = &ht[pteg + empty];
-	pte_lock(target);
-
-	/* Things may have changed since we got the lock */
-	if (target->bits.v && target->bits.avpn != pte.bits.avpn)
-		goto redo_search;
-
 
 	pte.bits.lock = 0;
 
@@ -229,6 +251,8 @@ xh_kern_pgflt(struct cpu_thread* thr, uval type, struct vexc_save_regs *vr)
 	struct vm_class *vmc = NULL;
 	uval orig_addr;
 	struct thread_control_area *tca = get_tca();
+
+	hit_counter(HCNT_HPTE_MISS);
 
 	if (type == 1) {
 		orig_addr = mfdar();
@@ -311,6 +335,8 @@ xh_kern_slb(struct cpu_thread* thread, uval type, struct vexc_save_regs *vr)
 	struct thread_control_area *tca = get_tca();
 	uval addr;
 
+	hit_counter(HCNT_SLB_MISS);
+
 	if (type == 1) {
 		addr = mfdar();
 	} else {
@@ -331,7 +357,7 @@ xh_kern_slb(struct cpu_thread* thread, uval type, struct vexc_save_regs *vr)
 	}
 
 	if (!vmc) {
-		hprintf("No vm_class for 0x%lx\n", addr);
+		hprintf("No vm_class for 0x%lx %lx %lx\n", addr, type, (uval)vr);
 		breakpoint();
 		return insert_debug_exception(thread, V_DEBUG_MEM_FAULT);
 	}

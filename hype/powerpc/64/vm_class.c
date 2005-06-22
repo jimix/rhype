@@ -28,6 +28,7 @@
 #include <objalloc.h>
 #include <vm_class.h>
 #include <vm_class_inlines.h>
+#include <counter.h>
 
 #define FORCE_4K_PAGES 1
 
@@ -149,6 +150,7 @@ void
 vmc_deactivate(struct cpu_thread *thread, struct vm_class *vmc)
 {
 	uval i = 0;
+	hit_counter(HCNT_CLASS_DEACTIVATE);
 
 	/* The vmc is responsible for all vsids in its range, even
 	 * if vmc_base_ea is not at the vm class boundary
@@ -181,7 +183,7 @@ vmc_activate(struct cpu_thread *thread, struct vm_class *vmc)
 {
 	uval idx = 0;
 	uval i = 0;
-
+	hit_counter(HCNT_CLASS_ACTIVATE);
 	vmc_get(vmc);
 	return;
 
@@ -287,9 +289,11 @@ vmc_reflect_enter(struct vm_class *vmc, struct cpu_thread *thr,
 	sval ret = insert_ea_map(thr, vsid, ea, lpte.bits.present, pte);
 	if (ret == H_Success) {
 		if (lpte.bits.present) {
-			++vmc->vmc_num_ptes;
+			hit_counter(HCNT_HPTE_INSERT);
+			atomic_add32(&vmc->vmc_num_ptes,1);
 		} else {
-			--vmc->vmc_num_ptes;
+			hit_counter(HCNT_HPTE_REMOVE);
+			atomic_add32(&vmc->vmc_num_ptes,(uval32)-1);
 		}
 	}
 	return ret;
