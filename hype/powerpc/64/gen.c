@@ -376,6 +376,9 @@ main(void)
 	DECLARE(TCA_RESTORE_FN,
 		offsetof(struct thread_control_area, restore_fn));
 
+	DECLARE(TCA_EXC_NUM,
+		offsetof(struct thread_control_area, exc_num));
+
 	DECLARE(CT_VREGS, offsetof(struct cpu_thread, vregs));
 #endif /* FORCE_APPLE_MODE */
 

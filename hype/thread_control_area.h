@@ -67,6 +67,7 @@ struct thread_control_area {
 				 * used for delivering deferred dec/ext */
 	uval srr0;
 	uval srr1;
+	uval exc_num;
 #endif
 	struct cpu_thread *old_thread;
 	uval lastfew[32];	/* does this position mean anything */

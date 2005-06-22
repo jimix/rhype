@@ -32,7 +32,7 @@
 #include <vdec.h>
 #include <cpu_thread_inlines.h>
 
-static void
+void
 save_sprs(struct cpu_thread *thread)
 {
 	if (hv_features(thread->cpu->os)) {
@@ -118,14 +118,6 @@ preempt_thread(struct cpu_thread *thread, uval timer)
 	if (preempt_cpu) {
 		/* We are going to preempt this cpu. Preempt this
 		 * thread and go into the cpu idle state */
-
-		save_sprs(thread);
-		save_slb(thread);
-		save_float(thread);
-
-		tca->old_thread = tca->active_thread;
-		tca->active_thread = NULL;
-
 		cpu_idle();
  		assert(0, "point of no return - should on get here");
 	}

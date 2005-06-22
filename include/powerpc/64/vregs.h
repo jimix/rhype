@@ -29,12 +29,14 @@
 
 #define NUM_EXC_SAVES	8
 
-#define EXC_V_DEC	0
-#define EXC_V_SYSCALL	1
-#define EXC_V_PGFLT	2
-#define EXC_V_FP	4
-#define EXC_V_EXT	5
-#define EXC_V_DEBUG	15
+#define EXC_V_DEC		0
+#define EXC_V_SYSCALL		1
+#define EXC_V_PGFLT		2
+#define EXC_V_FP		4
+#define EXC_V_EXT		5
+#define EXC_V_ALTIVEC		6
+#define EXC_V_ALTIVEC_ASSIST	7
+#define EXC_V_DEBUG		15
 
 #define NUM_KERNEL_VMC	8
 

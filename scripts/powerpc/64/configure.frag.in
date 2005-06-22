@@ -113,6 +113,7 @@ case "${PLATFORM}" in
     AC_DEFINE(SWSLB_SR_NUM, 64) # how many SLB's to save and restore
     AC_DEFINE(HAS_HYPE_SYSCALL)
     AC_DEFINE(HAS_HDECR)
+    AC_DEFINE(HAS_VMX)
     AC_DEFINE(HAS_MSR_HV)
     AC_DEFINE(CPU_CORE, 970)
     CPU_CORE=970

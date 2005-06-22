@@ -72,6 +72,38 @@
 .endm
 
 
+/* r4, r5  must be free for use */
+.macro NONSTD_RESTORE_BREAKOUT
+	LDR	r4, TCA_CPU_THREAD(r13)
+	LDR	r5, CT_THR_MODE(r4)
+	lbz	r4, CT_PREEMPT(r4)
+	CMPI	r4, 0 /* should we preempt? */
+	bnel	save_all
+	andi.	r4, r5, VSTATE_FORCE_EXCEPTION
+	bne-	__deliver_async_exception
+	LDR	r4, TCA_RESTORE_FN(r13)
+	cmpdi	r4, 0
+	bne-	alternate_restore
+.endm
+	
+.macro MEM_EXCEPTION_HANDLER type, func
+	SAVE_SPECIALS_TO_VREGS r12, r11
+	SAVE_GPRS_TO_BUFFER r0, r10, VS_GPRS, r11
+	SAVE_R11_R13_TO_BUFFER r12, VS_GPRS, r11
+	LDR	r1,TCA_HYPE_STACK(r13) 	/* get stack pointer */
+	li	r4, \type
+	LDR	r3, TCA_CPU_THREAD(r13)
+	mr	r5, r11
+	LOADADDR(r6, \func)
+	CALL_CFUNC(r6)
+
+	NONSTD_RESTORE_BREAKOUT
+
+	LDR	r12, TCA_SAVE_AREA(r13)
+	/* handler function returns value of r3 */
+	b	partial_restore_save_area
+.endm
+
 	
 			
 .macro  RESTORE_SPECIALS_FROM_VREGS scratch, vregs
@@ -106,10 +138,6 @@
 	mtspr	SPRN_SPRG1, r11
 	mfspr	r12, SPRN_SPRG0
 	mfcr	r13	/* andi. will modify cr */
-	mfsrr0	r11
-	std	r11, \vec + 8 (r0)
-	mfsrr1	r11
-	std	r11, \vec + 16 (r0)
 .if \gdb_breakout
 #ifdef USE_GDB_STUB
 	mfsrr1	r11
@@ -167,21 +195,9 @@
 
 	
 .macro SAVE_VOLATILES_AND_REFLECT_EXCEPTION exnum
-	SAVE_SPECIALS_TO_VREGS r12, r11
-	SAVE_GPRS_TO_BUFFER r0, r10, VS_GPRS, r11
-	SAVE_R11_R13_TO_BUFFER r12, VS_GPRS, r11
-
-	LDR	r1, TCA_HYPE_STACK(r13)	/* get stack pointer */
-
-	LOADADDR(r5, insert_exception)
-	li	r4, \exnum
-	LDR	r3, TCA_CPU_THREAD(r13)
-	CALL_CFUNC(r5)
-
-	NONSTD_RESTORE_BREAKOUT
-
-	LDR	r12, TCA_SAVE_AREA(r13)
-	b	partial_restore_save_area
+	li	r12, \exnum
+	std	r12, TCA_EXC_NUM(r13)
+	ba	save_and_reflect_exception
 .endm
 
 /*
@@ -251,21 +267,31 @@ ex_sysreset:
 	
 	. = 0xe00
 	ba	ex_fp
-			
+
+	. = 0xf20
+	ba	ex_altivec
+	
+	. = 0x1700
+	ba	ex_altivec_assist
+				
 ex_machcheck:
 	HYPE_PROLOG 0x200, force_gdb_reflect, 0
 	
 ex_dsi:
-	HYPE_PROLOG 0x300, kspace_dsi, 0
+	HYPE_COMMON_PROLOG 0x300, 0
+	MEM_EXCEPTION_HANDLER 1, xh_kern_pgflt
 
 ex_data_slb:
-	HYPE_PROLOG 0x380, kspace_slb, 0
+	HYPE_COMMON_PROLOG 0x380, 0
+	MEM_EXCEPTION_HANDLER 1, xh_kern_slb
 
 ex_isi:
-	HYPE_PROLOG 0x400, kspace_isi, 0
+	HYPE_COMMON_PROLOG 0x400, 0
+	MEM_EXCEPTION_HANDLER 0, xh_kern_pgflt
 
 ex_inst_slb:
-	HYPE_PROLOG 0x480, kspace_inst_slb, 0
+	HYPE_COMMON_PROLOG 0x480, 0
+	MEM_EXCEPTION_HANDLER 0, xh_kern_slb
 
 ex_interrupt:
 	HYPE_PROLOG 0x500, pre_handle_external, 0
@@ -292,68 +318,19 @@ ex_trace:
 ex_fp:
 	HYPE_PROLOG 0xe00, force_gdb_reflect, 0
 
+ex_altivec:
+	HYPE_PROLOG 0xf20, altivec_reflect, 0
+
+ex_altivec_assist:
+	HYPE_PROLOG 0x1700, altivec_assist_reflect, 0
+	
+	
 	.align 3
 hype_vecend:			# but some stuff here so we see the next symbol
 	.long 0xdeadbeef
 	.long 0xdeadbeef
 
-kspace_noimp:
-uspace_noimp:
-	tw	31, 0, 0
-	b	uspace_noimp
 
-uspace_isi:	
-uspace_inst_slb:
-uspace_dsi:
-uspace_slb:	
-	tw	31, 0, 0
-	b	uspace_noimp
-	
-
-/* r4, r5  must be free for use */
-.macro NONSTD_RESTORE_BREAKOUT
-	LDR	r4, TCA_CPU_THREAD(r13)
-	LDR	r5, CT_THR_MODE(r4)
-	lbz	r4, CT_PREEMPT(r4)
-	CMPI	r4, 0 /* should we preempt? */
-	bnel	save_all
-	andi.	r4, r5, VSTATE_FORCE_EXCEPTION
-	bne-	__deliver_async_exception
-	LDR	r4, TCA_RESTORE_FN(r13)
-	cmpdi	r4, 0
-	bne-	alternate_restore
-.endm
-	
-.macro MEM_EXCEPTION_HANDLER type, func
-	SAVE_SPECIALS_TO_VREGS r12, r11
-	SAVE_GPRS_TO_BUFFER r0, r10, VS_GPRS, r11
-	SAVE_R11_R13_TO_BUFFER r12, VS_GPRS, r11
-	LDR	r1,TCA_HYPE_STACK(r13) 	/* get stack pointer */
-	li	r4, \type
-	LDR	r3, TCA_CPU_THREAD(r13)
-	mr	r5, r11
-	LOADADDR(r6, \func)
-	CALL_CFUNC(r6)
-
-	NONSTD_RESTORE_BREAKOUT
-
-	LDR	r12, TCA_SAVE_AREA(r13)
-	/* handler function returns value of r3 */
-	b	partial_restore_save_area
-.endm
-
-kspace_slb:
-	MEM_EXCEPTION_HANDLER 1, xh_kern_slb
-
-kspace_dsi:
-	MEM_EXCEPTION_HANDLER 1, xh_kern_pgflt
-
-kspace_inst_slb:
-	MEM_EXCEPTION_HANDLER 0, xh_kern_slb
-
-kspace_isi:
-	MEM_EXCEPTION_HANDLER 0, xh_kern_pgflt
-				
 kspace_prog_ex:
 	/* This could be a user-space trap */
 	ld	r12, TCA_CPU_THREAD(r13)
@@ -421,10 +398,33 @@ uspace_syscall:
 float_reflect:
 	SAVE_VOLATILES_AND_REFLECT_EXCEPTION EXC_V_FP
 
+altivec_assist_reflect:
+	SAVE_VOLATILES_AND_REFLECT_EXCEPTION EXC_V_ALTIVEC_ASSIST
+
+altivec_reflect:
+	SAVE_VOLATILES_AND_REFLECT_EXCEPTION EXC_V_ALTIVEC
+	
 external_reflect:
 	SAVE_VOLATILES_AND_REFLECT_EXCEPTION EXC_V_EXT
 
 	
+save_and_reflect_exception:	
+	SAVE_SPECIALS_TO_VREGS r12, r11
+	SAVE_GPRS_TO_BUFFER r0, r10, VS_GPRS, r11
+	SAVE_R11_R13_TO_BUFFER r12, VS_GPRS, r11
+
+	LDR	r1, TCA_HYPE_STACK(r13)	/* get stack pointer */
+
+	LOADADDR(r5, insert_exception)
+	ld	r4, TCA_EXC_NUM(r13)
+	LDR	r3, TCA_CPU_THREAD(r13)
+	CALL_CFUNC(r5)
+
+	NONSTD_RESTORE_BREAKOUT
+
+	LDR	r12, TCA_SAVE_AREA(r13)
+	b	partial_restore_save_area
+
 			
 kspace_syscall:		
 	/* For syscalls from kernel to kernel, we have to reflect */

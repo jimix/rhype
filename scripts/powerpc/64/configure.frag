@@ -129,6 +129,10 @@ EOF
 EOF
 
     cat >> confdefs.h <<\EOF
+#define HAS_VMX 1
+EOF
+
+    cat >> confdefs.h <<\EOF
 #define HAS_MSR_HV 1
 EOF
 
