@@ -36,6 +36,7 @@ OBJECTS =	arch_os.o \
 		assprint.o \
 		boot_stack.o \
 		breakpoint.o \
+		counter.o \
 		create_msgq.o \
 		crq.o \
 		debug_ctl.o \
@@ -194,7 +195,7 @@ hype.o: $(HEAD) $(OBJECTS)
 	$(HOST_LINK.o) -r $^ -o $@
 
 # Make in all one elf segment.
-HOBJS = hype.o $(ISA_CONTROLLER)
+HOBJS = pre_link.o hype.o post_link.o $(ISA_CONTROLLER)
 
 libhype=../lib/$(ISA)/$(CPU_GRP)/libhype.a
 
