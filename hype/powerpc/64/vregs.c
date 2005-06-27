@@ -35,23 +35,23 @@
 #define FORCE_4K_PAGES 1
 
 
-struct vregs_vm_class 
+struct vregs_vm_class
 {
 	struct vm_class vvc_vm_class;
 	union pte*	protected_pte;
 };
 
 
-void 
+void
 __thread_set_MER(struct cpu_thread *thr)
 {
 	struct vregs_vm_class *vmc = PARENT_OBJ(typeof(*vmc), vvc_vm_class,
 						thr->vmc_vregs);
-	
+
 	union pte * p = vmc->protected_pte;
 
 	union pte pte = *p;
-	
+
 	if (is_MER_active(thr)) {
 		pte.bits.pp0 = PP_RWRx & 1;
 		pte.bits.pp1 = PP_RWRx >> 1;
@@ -59,11 +59,11 @@ __thread_set_MER(struct cpu_thread *thr)
 		pte.bits.pp0 = PP_RWRW & 1;
 		pte.bits.pp1 = PP_RWRW >> 1;
 	}
-	
+
 	if (pte.words.rpnWord != p->words.rpnWord) {
-		uval vsid = vmc_class_vsid(thr, &vmc->vvc_vm_class, 
+		uval vsid = vmc_class_vsid(thr, &vmc->vvc_vm_class,
 					   VREG_PROTECTED_BASE);
-		
+
 		uval vpn = vpn_from_vsid_ea(vsid, VREG_PROTECTED_BASE);
 		htab_entry_modify(p, vpn, &pte);
 	}
@@ -107,7 +107,7 @@ vmc_vregs_exception(struct vm_class *vmc, struct cpu_thread *thr,
 
 	if (eaddr >= VREG_BASE) {
 		sval ret = insert_ea_map(thr, vsid, eaddr, 1, pte);
-		assert(ret == H_Success, 
+		assert(ret == H_Success,
 		       "Failed on vregs area PTE insertion\n");
 		return vr->reg_gprs[3];
 	}
@@ -123,22 +123,22 @@ vmc_vregs_exception(struct vm_class *vmc, struct cpu_thread *thr,
 
 
 	uval32 ins = fetch_instruction(thr, get_tca()->srr0);
-	
+
 	uval opcode = extract_bits(ins, 0, 6);
 	uval update_bit = extract_bits(ins, 31, 1);
-	
+
 	assert(opcode == 62 && update_bit == 0, "bad store op code\n");
-	
+
 	uval rs = extract_bits(ins, 6, 5);
 	uval ds = extract_bits(ins, 16, 14) << 2;
 
 	assert(ds == (eaddr & 0xffff), "eaddr doesn't match ds\n");
 	assert(rs < 14, "assuming rs is r0 .. r13\n");
-	
+
 	uval val = vr->reg_gprs[rs];
-	
+
 	set_v_msr(thr, val);
-	
+
 	get_tca()->srr0 += sizeof(uval32);
 
 	return vr->reg_gprs[3];
@@ -152,7 +152,7 @@ struct vm_class_ops vmc_vregs_ops =
 	.vmc_exception = vmc_vregs_exception,
 };
 
-	
+
 
 struct vm_class*
 vmc_create_vregs(struct cpu_thread *thr)
@@ -160,23 +160,39 @@ vmc_create_vregs(struct cpu_thread *thr)
 	struct vregs_vm_class* vmc = halloc(sizeof(*vmc));
 	if (!vmc) return NULL;
 
-	vmc_init(&vmc->vvc_vm_class, ~0ULL, VREG_PROTECTED_BASE, 
+	vmc_init(&vmc->vvc_vm_class, ~0ULL, VREG_PROTECTED_BASE,
 		 2 * PGSIZE, &vmc_vregs_ops);
 	vmc->vvc_vm_class.vmc_data = (uval)halloc(PGSIZE);
 
 
-	union ptel pte;
-	pte.word = 0;
+
+	uval vsid = vmc_class_vsid(thr, &vmc->vvc_vm_class,
+				   VREG_PROTECTED_BASE);
+
+	uval vpn = vpn_from_vsid_ea(vsid, VREG_PROTECTED_BASE);
+	union pte pte;
+	pte.words.rpnWord = 0;
+	pte.words.vsidWord = 0;
 	pte.bits.rpn = vmc->vvc_vm_class.vmc_data >> LOG_PGSIZE;
 	pte.bits.m = 1;
 	pte.bits.pp0 = PP_RWRW & 1;
 	pte.bits.pp1 = PP_RWRW >> 1;
+	pte.bits.avpn = (vsid << 5) | VADDR_TO_API(vpn << LOG_PGSIZE);
+	pte.bits.v = 1;
 
-	uval vsid = vmc_class_vsid(thr, &vmc->vvc_vm_class, 
-				   VREG_PROTECTED_BASE);
-	
-	vmc->protected_pte = __insert_ea_map(thr, vsid, VREG_PROTECTED_BASE, 
-					     1, 1, pte);
+	/* We don't unlock the PTE because we want to ensure nobody
+	 * ever touches it
+	 */
+	pte.bits.bolted = 1;
+	pte.bits.lock = 1;
+
+	union pte * target = locate_clear_lock_target(thr, vpn);
+
+	vmc->protected_pte = target;
+
+	htab_entry_modify(target, vpn, &pte);
+
+
 	return &vmc->vvc_vm_class;
 }
 

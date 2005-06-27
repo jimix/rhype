@@ -127,4 +127,22 @@ vmc_lookup(struct cpu_thread *thr, uval id)
 	return vmc;
 }
 
+static inline void
+vmc_mark_mapping_insert(struct vm_class *vmc, struct cpu_thread *thr)
+{
+	atomic_add32(&vmc->vmc_num_ptes,1);
+#ifdef HPTE_AGING
+	vmc->vmc_gen_id = htab_generation(&thr->cpu->os->htab);
+#else
+	(void)thr;
+#endif
+}
+
+static inline void
+vmc_mark_mapping_evict(struct vm_class *vmc)
+{
+	atomic_add32(&vmc->vmc_num_ptes,(uval32)-1);
+}
+
+
 #endif /* _POWERPC_64_VM_CLASS_INLINES_H */

@@ -49,8 +49,20 @@ h_vm_class_op(struct cpu_thread *thread, uval id,
 		goto done;
 	}
 
-	ret = vmc->vmc_ops->vmc_op(vmc, thread, imp_arg1, imp_arg2,
-				   imp_arg3, imp_arg4);
+	switch (imp_arg1) {
+#ifdef HPTE_AGING
+	case H_VMC_CURR_AGE:
+		return_arg(thread, 1, vmc->vmc_gen_id);
+		break;
+	case H_VMC_CURR_GEN:
+		return_arg(thread, 1, htab_generation(&thread->cpu->os->htab));
+		break;
+#endif
+	default:
+		ret = vmc->vmc_ops->vmc_op(vmc, thread, imp_arg1, imp_arg2,
+					   imp_arg3, imp_arg4);
+	}
+
 	vmc_put(vmc);
 done:
 	lock_release(&thread->cpu->os->po_mutex);

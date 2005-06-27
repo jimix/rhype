@@ -31,6 +31,7 @@
 #include <objalloc.h>
 #include <bitops.h>
 #include <debug.h>
+#include <htab_inlines.h>
 
 static uval
 htab_calc_sdr1(uval htab_addr, uval log_htab_size)
@@ -142,6 +143,34 @@ htab_alloc(struct os *os, uval log_htab_bytes)
 		os->po_lpid, htab_raddr, os->htab.num_ptes);
 }
 
+uval
+htab_purge_vmc(struct cpu_thread *thr, struct vm_class* vmc)
+{
+	uval num_purged = 0;
+
+	uval end = thr->cpu->os->htab.num_ptes;
+	uval i = 0;
+	union pte *ht = (union pte*)GET_HTAB(thr->cpu->os);
+	for (; i < end; ++i) {
+		/* vsid is 52 bits, avpn has 57 */
+		uval pte_vsid = ht[i].bits.avpn >> 5;
+
+		if (ht[i].bits.v == 0) continue;
+		if (vsid_class_id(pte_vsid) != vmc->vmc_id) continue;
+		if (vsid_lpid_id(pte_vsid) != thr->cpu->os->po_lpid_tag)
+			continue;
+
+		pte_lock(&ht[i]);
+
+		uval vpn = vpn_from_pte(&ht[i], i >> LOG_NUM_PTES_IN_PTEG);
+		htab_entry_modify(&ht[i], vpn, NULL);
+		pte_unlock(&ht[i]);
+		++num_purged;
+	}
+	return num_purged;
+}
+
+
 void
 htab_free(struct os *os)
 {
@@ -160,3 +189,49 @@ htab_free(struct os *os)
 
 	DEBUG_OUT(DBG_MEMMGR, "HTAB: freed htab at 0x%lx\n", ht_ea);
 }
+
+#ifdef HPTE_AGING
+uval
+htab_scan_range(struct logical_htab *lh, uval age, uval idx, uval num)
+{
+	union pte *htab = (union pte*)(lh->sdr1 & SDR1_HTABORG_MASK);
+	union pte *p = htab + idx;
+	uval i = 0;
+	uval curr = htab_generation(lh);
+	uval num_purged = 0;
+
+	for (; i < num; ++i, ++p) {
+
+		if (pte_islocked(p)) continue;
+		if (pte_immortal(p)) continue;
+		if (curr - pte_age(p, curr) < age) continue;
+		if (!pte_trylock(p)) continue;
+
+		uval pteg = ((uval)((p - htab))) >> LOG_NUM_PTES_IN_PTEG;
+		uval vpn = vpn_from_pte(p, pteg);
+		htab_entry_delete(p, vpn);
+		pte_unlock(p);
+		++num_purged;
+	}
+	return num_purged;
+}
+
+void
+htab_scan(struct logical_htab *lh)
+{
+	/* FIXME need a lock here, for modifications to lh struct */
+	uval scan_size = lh->num_ptes >> LOG_HPTE_AGING_LIMIT;
+	uval end_scan = lh->num_scanned + scan_size;
+	uval idx = lh->num_scanned;
+
+	htab_scan_range(lh, idx, HPTE_PURGE_AGE, scan_size);
+
+	if (end_scan == lh->num_ptes) {
+		++lh->curr_gen;
+		lh->num_scanned = 0;
+	} else {
+		lh->num_scanned = end_scan;
+	}
+
+}
+#endif

@@ -187,6 +187,9 @@ extern sval hcall_set_spr(uval *retvals, uval reg, uval val);
 #define H_VM_CLASS_TABLE		2
 
 #define H_VMC_REFLECT_ENTER		1
+#define H_VMC_CURR_AGE			2
+#define H_VMC_CURR_GEN			3
+
 extern sval hcall_create_vm_class(uval *retvals, uval type, uval id,
 				  uval ea_base, uval size,
 				  uval imp_arg1, uval imp_arg2,

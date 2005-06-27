@@ -130,6 +130,9 @@ struct vm_class {
 	uval vmc_base_ea; /* effective base address */
 	uval vmc_size;
 	uval32 vmc_active_count;
+#ifdef HPTE_AGING
+	uval64 vmc_gen_id;	/* generation id of last insertion */
+#endif
 	uval32 vmc_num_ptes; /* number of pte's inserted by class */
 	uval64 vmc_slb_entries;
 	uval16 vmc_slb_cache[VMC_SLB_CACHE_SIZE];
@@ -165,12 +168,12 @@ extern void vmc_deactivate(struct cpu_thread *thread, struct vm_class *vmc);
 /* Enable mappings associated with this vmc */
 extern void vmc_activate(struct cpu_thread *thread, struct vm_class *vmc);
 
-extern sval htab_purge_vsid(struct cpu_thread *thr, uval vsid, uval num_vsids);
 extern sval insert_ea_map(struct cpu_thread *thr, uval vsid,
 			  uval ea, uval valid, union ptel pte);
 
-extern union pte* __insert_ea_map(struct cpu_thread *thr, uval vsid, uval ea,
-				  uval valid, uval bolted, union ptel entry);
+extern union pte* locate_clear_lock_target(struct cpu_thread* thr, uval vpn);
+
+extern uval htab_purge_vmc(struct cpu_thread *thr, struct vm_class* vmc);
 
 
 #endif /* _POWERPC_64_VM_CLASS_H */

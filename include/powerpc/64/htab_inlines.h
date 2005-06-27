@@ -29,6 +29,42 @@
 #include <mmu_defs.h>
 #include <bitmap.h>
 
+
+#ifdef HPTE_AGING
+static inline void pte_set_gen(union pte* pte, uval val)
+{
+	pte->bits.res = val & 1;
+	pte->bits.sw = (val >> 1) & 1;
+}
+
+static inline uval pte_gen_value(union pte* pte)
+{
+	return (pte->bits.sw << 1) + pte->bits.res;
+}
+
+static inline uval pte_immortal(union pte* pte)
+{
+	return pte->bits.bolted;
+}
+
+static inline uval pte_age(union pte* pte, uval htab_age)
+{
+	uval v = pte_gen_value(pte);
+	uval base = htab_age & 0x3;
+	if (base + v > htab_age) {
+		base -= 4;
+	}
+	return base + v;
+}
+
+#endif
+
+static inline uval
+pte_islocked(union pte *pte)
+{
+	return pte->bits.lock;
+}
+
 static inline uval
 pte_trylock(union pte *pte)
 {
@@ -73,7 +109,7 @@ vpn_from_vsid_ea(uval64 vsid, uval64 ea)
 {
 	return ((ea & (SEGMENT_SIZE-1)) >> LOG_PGSIZE) |
 		(vsid << (LOG_SEGMENT_SIZE - LOG_PGSIZE));
-	
+
 }
 
 

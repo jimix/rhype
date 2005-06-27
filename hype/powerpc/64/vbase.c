@@ -31,10 +31,12 @@
 #include <thread_control_area.h>
 #include <objalloc.h>
 #include <vm_class.h>
+#include <cpu_thread.h>
 #include <vm_class_inlines.h>
 #include <vdec.h>
 #include <vm.h>
 #include <bitmap.h>
+#include <htab.h>
 #include <htab_inlines.h>
 #include <lpidtag.h>
 #include <debug.h>
@@ -89,33 +91,6 @@ sval xh_kern_slb(struct cpu_thread* thread, uval addr,
 sval xh_kern_pgflt(struct cpu_thread* thread, uval addr,
 		   struct vexc_save_regs *vr);
 
-sval
-htab_purge_vsid(struct cpu_thread *thr, uval vsid, uval num_vsids)
-{
-	uval end = thr->cpu->os->htab.num_ptes;
-	uval i = 0;
-	union pte *ht = (union pte*)GET_HTAB(thr->cpu->os);
-	for (; i < end; ++i) {
-		/* vsid is 52 bits, avpn has 57 */
-		uval pte_vsid = ht[i].bits.avpn >> 5;
-
-		if (ht[i].bits.v == 0 || pte_vsid - vsid >= num_vsids) {
-			continue;
-		}
-
-		pte_lock(&ht[i]);
-		if (ht[i].bits.v == 0 || pte_vsid - vsid >= num_vsids) {
-			pte_unlock(&ht[i]);
-			continue;
-		}
-
-		uval vpn = vpn_from_pte(&ht[i], i >> LOG_NUM_PTES_IN_PTEG);
-		htab_entry_modify(&ht[i], vpn, NULL);
-		pte_unlock(&ht[i]);
-	}
-	return H_Success;
-}
-
 
 static void
 vm_class_evict_pte(union pte *entry, uval pteg)
@@ -136,56 +111,43 @@ vm_class_evict_pte(union pte *entry, uval pteg)
 	struct vm_class* vmc = vmc_lookup(target, class);
 	assert(vmc, "No vmc found for PTE entry\n");
 
-	atomic_add32(&vmc->vmc_num_ptes,(uval32)-1);
+	vmc_mark_mapping_evict(vmc);
 
 	vmc_put(vmc);
 }
 
-sval
-insert_ea_map(struct cpu_thread *thr, uval vsid, uval ea, uval valid,
-	      union ptel entry)
-{
-	union pte* ret = __insert_ea_map(thr, vsid, ea, valid, 0, entry);
-	assert(ret , "PTE insertion failure\n");
-
-	return H_Success;
-}
-
-
-
 union pte*
-__insert_ea_map(struct cpu_thread *thr, uval vsid, uval ea, uval valid,
-		uval bolted, union ptel entry)
+locate_clear_lock_target(struct cpu_thread* thr, uval vpn)
 {
-	int j = 0;
 	uval lp = LOG_PGSIZE;  /* FIXME: get large page size */
-	uval log_ht_size = bit_log2(thr->cpu->os->htab.num_ptes)+ LOG_PTE_SIZE;
 
-	uval vpn = vpn_from_vsid_ea(vsid, ea);
-	uval pteg = NUM_PTES_IN_PTEG * get_pteg(vpn << LOG_PGSIZE,
-						vsid, lp, log_ht_size);
-
-	union pte *ht = (union pte *)GET_HTAB(thr->cpu->os);
-	union pte pte;
-
-	pte.words.vsidWord = 0;
-	pte.words.rpnWord = entry.word;
-
-	pte.bits.avpn = (vsid << 5) | VADDR_TO_API(vpn << LOG_PGSIZE);
-	pte.bits.v = valid;
-	pte.bits.bolted = bolted;
-
+	int j = 0;
 	union pte *target;
 	int empty;
-	uval remove;
 	uval verbose = 0;
-redo_search:
+	uval vsid = vpn >> (LOG_SEGMENT_SIZE - LOG_PGSIZE);
+	uval log_ht_size = bit_log2(thr->cpu->os->htab.num_ptes)+ LOG_PTE_SIZE;
+	uval pteg = NUM_PTES_IN_PTEG * get_pteg(vpn << LOG_PGSIZE,
+						vsid, lp, log_ht_size);
+	union pte *ht = (union pte *)GET_HTAB(thr->cpu->os);
+	uval avpn = (vsid << 5) | VADDR_TO_API(vpn << LOG_PGSIZE);
 
+#ifdef HPTE_AGING
+	uval32 ages;
+	uval scanned = 0;
+	uval now = htab_generation(&thr->cpu->os->htab);
+#endif
+
+redo_search:
+#ifdef HPTE_AGING
+	ages = 0;
+#endif
 	j = 0;
 
 	empty = NUM_PTES_IN_PTEG;
-	remove = 0;
+
 	target = &ht[pteg];
+
 
 	for (; j < NUM_PTES_IN_PTEG; ++j, ++target) {
 		if (verbose) {
@@ -198,39 +160,123 @@ redo_search:
 				vsid_class_offset(v), x);
 		}
 
-		if (target->bits.avpn == pte.bits.avpn) {
-			empty = j;
-			remove = 1;
+#ifdef HPTE_AGING
+		/* Mark in bitmap age of each entry */
+		/* Oldest entries in most-significant bits, so a log operation
+		 * will give us a good choice for eviction */
+		{
+			uval age = now - pte_age(target, now);
+			ages |= (1 << (j + 8 * age));
+		}
+#endif
 
+		if (target->bits.avpn == avpn) {
+			empty = j;
 			break;
 		}
+		if (pte_islocked(target)) {
+			continue;
+		}
+
 		if (j < empty && target->bits.v == 0) {
 			empty = j;
 		}
 	}
 
-	if (empty == NUM_PTES_IN_PTEG) {
-		if (verbose) {
-			assert(empty != NUM_PTES_IN_PTEG, "Full htab\n");
-		}
-		verbose = 1;
-
-		/* random eviction? */
-		empty = mftb() & (NUM_PTES_IN_PTEG-1);
-		target = &ht[pteg + empty];
-		pte_lock(target);
-
-		vm_class_evict_pte(target, pteg);
-	} else {
+	if (empty != NUM_PTES_IN_PTEG) {
 		target = &ht[pteg + empty];
 		pte_lock(target);
 
 		/* Things may have changed since we got the lock */
-		if (target->bits.v && target->bits.avpn != pte.bits.avpn)
+		if (target->bits.v && target->bits.avpn != avpn)
 			goto redo_search;
+		return target;
 	}
 
+#ifndef HPTE_AGING
+	/* Random eviction */
+	do {
+		/* This ensures that we randomly pick empty,
+		 * but never pick the same value twice
+		 * consecutively */
+		empty = ((~empty) ^ mftb()) & (NUM_PTES_IN_PTEG-1);
+		target = &ht[pteg + empty];
+	} while (!pte_trylock(target));
+#else
+	/* Use aging facilities to find eviction target */
+
+	/* First try to scan the entire PTEG */
+	if (!scanned &&
+	    htab_scan_range(&thr->cpu->os->htab, HPTE_PURGE_AGE,
+			    pteg, NUM_PTES_IN_PTEG)) {
+		scanned = 1;
+		goto redo_search;
+	}
+
+
+
+	/* Try to evict the oldest, based on generation count */
+	while (ages) {
+		uval entry = bit_log2(ages);
+		uval age = entry / 8;
+		entry = entry & (NUM_PTES_IN_PTEG - 1);
+		ages &= ~(1ULL << entry);
+		target = &ht[pteg + entry];
+
+		/* If it is being locked then it may be renewed,
+		 * so ignore it for now */
+		if (!pte_trylock(target)) continue;
+
+		/* Found one that has become free */
+		if (target->bits.v == 0) {
+			ages = 1;  /* don't redo_search */
+			break;
+		}
+
+		/* Age has changed, so it's new */
+		if (age != now - pte_age(target, now)) continue;
+
+		/* It's as old as it was before, evict it */
+		ages = 1; /* don't redo_search */
+
+		break;
+
+	}
+
+	/* There are no old entries to evict. Means that there
+	 * should be something free
+	 */
+	if (!ages) goto redo_search;
+#endif
+	if (target->bits.v) {
+		vm_class_evict_pte(target, pteg);
+	}
+
+	return target;
+}
+
+
+sval
+insert_ea_map(struct cpu_thread *thr, uval vsid, uval ea, uval valid,
+	      union ptel entry)
+{
+	uval vpn = vpn_from_vsid_ea(vsid, ea);
+
+	union pte pte;
+
+	pte.words.vsidWord = 0;
+	pte.words.rpnWord = entry.word;
+
+	pte.bits.avpn = (vsid << 5) | VADDR_TO_API(vpn << LOG_PGSIZE);
+	pte.bits.v = valid;
+	pte.bits.bolted = 0;
 	pte.bits.lock = 0;
+
+#ifdef HPTE_AGING
+	pte_set_gen(&pte, htab_generation(&thr->cpu->os->htab));
+#endif
+
+	union pte *target = locate_clear_lock_target(thr, vpn);
 
 	/* Modify and unlock */
 	htab_entry_modify(target, vpn, &pte);
@@ -238,10 +284,13 @@ redo_search:
 	/* Above call doesn't unlock if pte.bits.v == 0 */
 	if (!valid) {
 		pte_unlock(target);
+#ifdef HPTE_AGING
+	} else {
+		htab_gen_record_add(&thr->cpu->os->htab);
+#endif
 	}
 
-
-	return target;
+	return H_Success;
 }
 
 
@@ -304,7 +353,7 @@ xh_kern_pgflt(struct cpu_thread* thr, uval type, struct vexc_save_regs *vr)
 
 	sval ret = insert_ea_map(thr, vsid, addr, 1, pte);
 	if (ret == H_Success) {
-		++vmc->vmc_num_ptes;
+		vmc_mark_mapping_insert(vmc, thr);
 		return vr->reg_gprs[3];
 	}
 
@@ -399,6 +448,9 @@ xh_syscall(uval a1, uval a2, uval a3, uval a4, uval a5, uval a6,
 	uval ret;
 	ret = hcall_fn(thread, a2, a3, a4, a5, a6, a7, a8, a9, a10);
 	tca->save_area->reg_gprs[3] = ret;
+
+	rcu_check();
+
 	return ret;
 }
 

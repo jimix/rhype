@@ -49,13 +49,17 @@ vmc_init(struct vm_class *vmc, uval id, uval base, uval size,
 sval
 vmc_destroy(struct cpu_thread *thr, struct vm_class *vmc)
 {
+	uval num = 0;
 	vmc_deactivate(thr, vmc);
 
 	if (vmc->vmc_num_ptes) {
-		htab_purge_vsid(thr,
-				vmc_class_vsid(thr, vmc, vmc->vmc_base_ea),
-				1ULL << VM_CLASS_BITS);
+		num = htab_purge_vmc(thr, vmc);
 	}
+
+#ifdef HPTE_AGING
+	uval vmc_age = htab_generation(&thr->cpu->os->htab) - vmc->vmc_gen_id;
+	assert(vmc_age < HPTE_PURGE_AGE ||num == 0, "Non-empty VMC\n");
+#endif
 
 	lock_acquire(&thr->cpu->os->po_mutex);
 
@@ -86,9 +90,6 @@ vmc_linear_xlate(struct vm_class *vmc, uval eaddr, union ptel *pte)
 	pte->bits.pp0 = PP_RWRW & 1UL;
 	pte->bits.pp1 = (PP_RWRW >> 1) & 3UL;
 
-	if (eaddr == 0xc000000004000000ULL) {
-		breakpoint();
-	}
 	return la;
 }
 
@@ -290,10 +291,11 @@ vmc_reflect_enter(struct vm_class *vmc, struct cpu_thread *thr,
 	if (ret == H_Success) {
 		if (lpte.bits.present) {
 			hit_counter(HCNT_HPTE_INSERT);
-			atomic_add32(&vmc->vmc_num_ptes,1);
+			vmc_mark_mapping_insert(vmc, thr);
+
 		} else {
 			hit_counter(HCNT_HPTE_REMOVE);
-			atomic_add32(&vmc->vmc_num_ptes,(uval32)-1);
+			vmc_mark_mapping_evict(vmc);
 		}
 	}
 	return ret;
