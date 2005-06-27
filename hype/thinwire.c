@@ -41,6 +41,11 @@
 /* IMMEDIATE == 1 --> immediately activate thinwire */
 #define IMMEDIATE		0
 
+#ifdef MACHINE_MAMBO
+#undef IMMEDIATE
+#define IMMEDIATE	1
+#endif
+
 
 /* Magic thinwire string that enables thinwire multi-plexing protocol */
 const char thinwire_magic_string[14] = "***thinwire***";
