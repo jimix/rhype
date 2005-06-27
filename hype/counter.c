@@ -23,19 +23,18 @@
 #include <hype.h>
 #include <counter.h>
 
-uval32 dbg_counters[NUM_COUNTERS] = { 0, };
+uval32 *dbg_counters = NULL;
+uval32 __dbg_counters[NUM_COUNTERS] = { 0, };
 uval16 dbg_counter_users[NUM_COUNTERS] = { 0, };
 
 lock_t counter_cfg_lock = lock_unlocked;
-
-uval counter_active;
 
 void
 freeze_all_counters(void)
 {
 	lock_acquire(&counter_cfg_lock);
 
-	counter_active = 0;
+	dbg_counters = NULL;
 	sync_after_acquire();
 
 	lock_release(&counter_cfg_lock);
@@ -47,7 +46,7 @@ thaw_all_counters(void)
 	lock_acquire(&counter_cfg_lock);
 
 	sync_before_release();
-	counter_active = 1;
+	dbg_counters = __dbg_counters;
 
 	lock_release(&counter_cfg_lock);
 }

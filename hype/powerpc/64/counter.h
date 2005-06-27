@@ -43,7 +43,7 @@ do {								\
 		     "	.llong 50b;\n"				\
 		     "	.previous;\n"				\
 		     : "=r" (cnt) : "i" (counter_id));		\
-	if (cnt >= 0 && counter_active)				\
+	if (cnt >= 0 && dbg_counters)				\
 		atomic_add32(&dbg_counters[cnt], 1);		\
 } while (0)
 #else

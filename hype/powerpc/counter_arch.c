@@ -66,7 +66,7 @@ zap_and_set_counter(uval counter, uval16 type)
 		++cf;
 	}
 
-	dbg_counters[counter] = 0;
+	__dbg_counters[counter] = 0;
 	if (cf == fixup_end) goto done;
 
 
@@ -76,8 +76,8 @@ zap_and_set_counter(uval counter, uval16 type)
 	set_li_val((uval32*)cf->fixup_addr, counter);
 
 	counter_ins_addr[counter] = (uval32*)cf->fixup_addr;
-	dbg_counter_users[counter] = type;
 done:
+	dbg_counter_users[counter] = type;
 	lock_release(&counter_cfg_lock);
 }
 

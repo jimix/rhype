@@ -82,7 +82,7 @@ h_debug(struct cpu_thread *thread, uval cmd, uval arg1,
 		break;
 	case H_COUNTER_GET:
 		if (arg1 >= NUM_COUNTERS) return H_Parameter;
-		return_arg(thread, 1, dbg_counters[arg1]);
+		return_arg(thread, 1, __dbg_counters[arg1]);
 		return_arg(thread, 2, dbg_counter_users[arg1]);
 		break;
 #endif

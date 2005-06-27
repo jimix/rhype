@@ -26,11 +26,11 @@
 
 #include <hcounters.h>
 
-extern uval32 dbg_counters[NUM_COUNTERS];
+extern uval32 *dbg_counters;
+extern uval32 __dbg_counters[NUM_COUNTERS];
 extern uval16 dbg_counter_users[NUM_COUNTERS];
 
 extern lock_t counter_cfg_lock;
-extern uval counter_active;
 
 extern void zap_and_set_counter(uval counter, uval16 type);
 
