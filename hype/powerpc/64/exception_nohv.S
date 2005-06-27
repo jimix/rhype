@@ -374,11 +374,15 @@ pre_handle_external:
 	LOADADDR(r4, handle_external)
 	CALL_CFUNC(r4)
 
-	cmpdi	r3, 1
-	bgt	save_all	/* returned 2 -> thread switch*/
+	/* Use cr4, as it is non-volatile */
+	cmpi	cr4, 1, r3, 1
+
+	bl	C_TEXT(rcu_check)
+	
+	bgt	cr4, save_all	/* returned 2 -> thread switch*/
 
 	/* returned 1 -> deliver exception to current thread */
-	beq	__deliver_async_exception
+	beq	cr4, __deliver_async_exception
 	
 	/* do nothing special, except regular restore */
 	LDR	r12, TCA_SAVE_AREA(r13)
@@ -551,7 +555,7 @@ preempt_save:
 	b	.
 			
 save_all:
-	trap
+	bl	C_TEXT(rcu_check)
 	LDR	r12, TCA_CPU_THREAD(r13)
 	LDR	r11, TCA_SAVE_AREA(r13)
 	
