@@ -36,6 +36,8 @@
 #include <vm.h>
 #include <bitmap.h>
 #include <cpu_thread_inlines.h>
+#include <hcounters.h>
+#include <counter.h>
 
 sval xh_kern_prog_ex(struct cpu_thread* thread, uval addr);
 
@@ -122,6 +124,7 @@ decode_spr_ins(struct cpu_thread* thr, uval addr, uval32 ins)
 
 	/* mfmsr */
 	if (opcode == 31 && type == 83) {
+		hit_counter(HCNT_PRIV_MFMSR);
 		//hprintf("mfmsr r%ld at 0x%lx\n",gpr, addr);
 		mtgpr(thr, gpr, thr->vregs->v_msr);
 		tca->srr0 += sizeof(uval32);
@@ -130,6 +133,8 @@ decode_spr_ins(struct cpu_thread* thr, uval addr, uval32 ins)
 
 	/* mtmsrd */
 	if (opcode == 31 && (type == 178 || type == 146)) {
+		hit_counter(HCNT_PRIV_MTMSRD);
+
 		uval64 val = mfgpr(thr, gpr);
 		//hprintf("mtmsrd r%ld <- 0x%llx at 0x%lx\n", gpr, val, addr);
 
@@ -155,6 +160,9 @@ decode_spr_ins(struct cpu_thread* thr, uval addr, uval32 ins)
 		tca->srr0 += sizeof(uval32);
 		return 0;
 	}
+
+
+	hit_counter(HCNT_PRIV_OTHER);
 
 	/* mfspr */
 #define SET_GPR(label, src)					\
@@ -326,9 +334,6 @@ insert_exception(struct cpu_thread *thread, uval exnum)
 	struct vregs* vregs = tca->vregs;
 	struct vexc_save_regs* vr = tca->save_area;
 
-	assert(exnum!=EXC_V_EXT || vregs->active_vsave<5,
-	       "catch\n");
-
 //	hprintf("Reflect exception: %ld %x\n", exnum, vr->exc_num);
 	if (!thread->vregs->exception_vectors[exnum])
 		return vregs->active_vsave;
@@ -343,7 +348,6 @@ insert_exception(struct cpu_thread *thread, uval exnum)
 
 	/* Provide accurate trap bits */
 	vr->v_srr1 = vregs->v_msr | (MSR_TRAP_BITS & tca->srr1);
-	assert(vr->v_srr1 != 0x2900, "bad msr\n");
 
 	/* enforce HV, EE, PR off, AM on */
 	uval vmsr = vregs->v_msr;
@@ -373,8 +377,6 @@ insert_exception(struct cpu_thread *thread, uval exnum)
 
 	vr->prev_vsave = vregs->active_vsave;
 	vregs->active_vsave = (vr - &vregs->vexc_save[0]);
-	assert(vr->prev_vsave == 0 || vr->prev_vsave < vregs->active_vsave,
-		"vsave problem");
 
 	return vregs->active_vsave;
 }

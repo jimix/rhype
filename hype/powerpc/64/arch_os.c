@@ -35,6 +35,7 @@
 #include <crq.h>
 #include <cpu_thread_inlines.h>
 #include <lpidtag.h>
+#include <counter.h>
 
 uval
 arch_os_init(struct os *newOS, uval pinfo_addr, uval use_rmo)
@@ -252,6 +253,7 @@ handle_external(struct cpu_thread *thread)
 	uval retval = 0;
 	uval lpar_msr;
 	uval lpar_pc;
+	hit_counter(HCNT_EXT_INT);
 
 	DEBUG_MT(DBG_INTRPT, "handle_external: enter\n", 0);
 
