@@ -347,6 +347,12 @@ xh_kern_pgflt(struct cpu_thread* thr, uval type, struct vexc_save_regs *vr)
 		ra = logical_to_physical_address(thr->cpu->os, la, PGSIZE);
 	}
 
+	if (ra == INVALID_LOGICAL_ADDRESS) {
+		hprintf("Reference to invalid address\n");
+		breakpoint();
+		goto reflect;
+	}
+
 	vsid = vmc_class_vsid(thr, vmc, addr);
 
 	pte.bits.rpn = ra >> LOG_PGSIZE;
