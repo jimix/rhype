@@ -275,7 +275,7 @@ ex_sysreset:
 	ba	ex_altivec_assist
 				
 ex_machcheck:
-	HYPE_PROLOG 0x200, force_gdb_reflect, 0
+	HYPE_PROLOG 0x200, force_gdb_reflect, 1
 	
 ex_dsi:
 	HYPE_COMMON_PROLOG 0x300, 0
