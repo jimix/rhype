@@ -31,14 +31,14 @@
 
 struct partition_status {
 	uval lpid;
-	uval init_mem;
-	uval init_mem_size;
 	uval vterm;
 	const char *name;
 	uval slot;
 	uval32 active;
 	uval32 msgrcv;
 	uval log_htab_bytes;
+	struct mem_range mem[MAX_MEM_RANGES]; /* from POV of controller*/
+	struct mem_range pmem[MAX_MEM_RANGES]; /* from POV of new partition*/
 };
 
 extern uval log_htab_bytes;

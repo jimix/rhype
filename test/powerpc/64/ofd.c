@@ -602,7 +602,7 @@ ofd_chosen_props(void *m)
 }
 
 static ofdn_t
-ofd_memory_props(void *m, uval mem_size)
+ofd_memory_props(void *m, struct mem_range partition_mem[MAX_MEM_RANGES])
 {
 	ofdn_t n = 0;
 	char fmt[] = "/memory@%lx";
@@ -610,6 +610,13 @@ ofd_memory_props(void *m, uval mem_size)
 	uval start = 0;
 	uval32 cells = 1;
 	uval32 size_cells = 1;
+	uval i = 0;
+	uval size;
+
+	/* Use a local copy we can modify */
+	struct mem_range mem[MAX_MEM_RANGES];
+
+	memcpy(mem, partition_mem, MAX_MEM_RANGES * sizeof(struct mem_range));
 
 
 	ofdn_t old;
@@ -625,8 +632,12 @@ ofd_memory_props(void *m, uval mem_size)
 	} while (1);
 
 
+	for (i = 0; i < MAX_MEM_RANGES; (mem[i].size == 0) ? ++i : i) {
+		if (mem[i].size == 0) continue;
 
-	while (start < mem_size) {
+		start = mem[i].addr;
+		size = mem[i].size;
+
 		/* FIXME: these two properties need to be set during parition
 		 * contruction */
 		uval32 regs[4];
@@ -649,6 +660,9 @@ ofd_memory_props(void *m, uval mem_size)
 		 * client program have been accounted for */
 		/* FIXME: obviously making this up */
 		if (start == 0) {
+			assert(size >= CHUNK_SIZE,
+			       "address at 0 must have full chunk avail\n");
+
 			regs[0] = 0;
 			regs[1] = 0;
 
@@ -661,6 +675,7 @@ ofd_memory_props(void *m, uval mem_size)
 
 			ofd_prop_add(m, n, "available", regs,
 				     4 * (cells + size_cells));
+
 		}
 
 		/* physical addresses usable without regard to OF */
@@ -675,13 +690,14 @@ ofd_memory_props(void *m, uval mem_size)
 			regs[cells] = 0;
 		}
 
-		if ((mem_size - start) > CHUNK_SIZE) {
+		if ((size - start) > CHUNK_SIZE) {
 			regs[size_cells + cells -1] = CHUNK_SIZE;
 		} else {
-			regs[size_cells + cells -1] = mem_size - start ;
+			regs[size_cells + cells -1] = size - start ;
 		}
 
-		start += regs[size_cells + cells - 1];
+		mem[i].addr += regs[size_cells + cells - 1];
+		mem[i].size -= regs[size_cells + cells - 1];
 		ofd_prop_add(m, n, "reg", &regs[0], 4 * (cells + size_cells));
 
 	}
@@ -825,7 +841,7 @@ ofd_lpar_create(struct partition_status *ps, uval new, uval mem)
 	ofd_chosen_props(m);
 
 	hputs("fix /memory@0 props\n");
-	ofd_memory_props(m, ps->init_mem_size);
+	ofd_memory_props(m, ps->pmem);
 
 	hputs("Remove /rtas, client stub creates its own\n");
 	ofd_prune(m, "rtas");

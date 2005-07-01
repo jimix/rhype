@@ -124,6 +124,8 @@ find_partition(uval lpid)
 static void
 destroy_partition(int idx)
 {
+	uval i = 0;
+
 	uval rc = hcall_destroy_partition(NULL,
 					  partitions[idx].lpid);
 	if (rc == H_Success) {
@@ -143,9 +145,15 @@ destroy_partition(int idx)
 		updatePartInfo(IPC_LPAR_DEAD,partitions[idx].lpid);
 		partitions[idx].active = 0;
 
-		free_pages(&logical_pa, partitions[idx].init_mem,
-			   partitions[idx].init_mem_size);
-		partitions[idx].init_mem = 0;
+		for (i = 0; i < MAX_MEM_RANGES; ++i) {
+			if (partitions[idx].mem[i].size == 0) continue;
+			free_pages(&logical_pa,
+				   partitions[idx].mem[i].addr,
+				   partitions[idx].mem[i].size);
+			partitions[idx].mem[i].size = 0;
+			partitions[idx].mem[i].addr = 0;
+		}
+
 		partitions[idx].lpid = -1;
 		partitions[idx].msgrcv = 0;
 	} else {
@@ -343,7 +351,7 @@ ask(uval deflist, uval ofd)
 	int i;
 	char inbuf[17];
 	uval sz;
-	uval chunks = 1;
+	uval chunks = CONTROLLER_MEM_CHUNKS;
 	uval lpalgn = LOG_CHUNKSIZE;
 
 	for (i = 0; i < 4; i++) {
@@ -727,8 +735,10 @@ test_os(uval argc, uval argv[])
 		curslots &= ~partitions[i].slot;
 		partitions[i].active = 0;
 
-		partitions[i].init_mem = 0;
-		partitions[i].init_mem_size = 0;
+		memset(&partitions[i].mem[0], 0,
+		       sizeof(struct mem_range) * MAX_MEM_RANGES);
+		memset(&partitions[i].pmem[0], 0,
+		       sizeof(struct mem_range) * MAX_MEM_RANGES);
 
 		partitions[i].lpid = -1;
 		partitions[i].vterm = 0;
