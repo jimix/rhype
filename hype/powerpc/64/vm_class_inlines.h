@@ -63,7 +63,7 @@ vmc_cache_slbe(struct vm_class* vmc, uval vsid)
 
 	}
 	if (idx < VMC_SLB_CACHE_SIZE) {
-		vmc->vmc_slb_cache[i] = cache_val;
+		vmc->vmc_slb_cache[idx] = cache_val;
 	}
 }
 
