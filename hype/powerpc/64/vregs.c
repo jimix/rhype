@@ -32,6 +32,7 @@
 #include <htab_inlines.h>
 #include <gen.h>
 #include <thread_control_area.h>
+#include <counter.h>
 #define FORCE_4K_PAGES 1
 
 
@@ -40,8 +41,7 @@ struct vregs_vm_class
 	struct vm_class vvc_vm_class;
 	union pte*	protected_pte;
 };
-
-
+//#define ALWAYS_TRAP
 void
 __thread_set_MER(struct cpu_thread *thr)
 {
@@ -52,6 +52,10 @@ __thread_set_MER(struct cpu_thread *thr)
 
 	union pte pte = *p;
 
+#ifdef ALWAYS_TRAP
+	pte.bits.pp0 = PP_RWRx & 1;
+	pte.bits.pp1 = PP_RWRx >> 1;
+#else
 	if (is_MER_active(thr)) {
 		pte.bits.pp0 = PP_RWRx & 1;
 		pte.bits.pp1 = PP_RWRx >> 1;
@@ -59,7 +63,7 @@ __thread_set_MER(struct cpu_thread *thr)
 		pte.bits.pp0 = PP_RWRW & 1;
 		pte.bits.pp1 = PP_RWRW >> 1;
 	}
-
+#endif
 	if (pte.words.rpnWord != p->words.rpnWord) {
 		uval vsid = vmc_class_vsid(thr, &vmc->vvc_vm_class,
 					   VREG_PROTECTED_BASE);
@@ -93,6 +97,7 @@ uval extract_bits(uval val, uval start, uval numbits)
 	return (val >> (32 - (start + numbits))) & ((1 << numbits) - 1);
 }
 
+
 static uval
 vmc_vregs_exception(struct vm_class *vmc, struct cpu_thread *thr,
 		    struct vexc_save_regs *vr, uval eaddr)
@@ -118,11 +123,14 @@ vmc_vregs_exception(struct vm_class *vmc, struct cpu_thread *thr,
 		return insert_exception(thr, EXC_V_PGFLT);
 	}
 
+	hit_counter(HCNT_MER_TRAP);
+
 	uval offset = eaddr - VREG_PROTECTED_BASE;
 	assert(offset == V_MSR, "Store to non-msr field\n");
 
-
 	uval32 ins = fetch_instruction(thr, get_tca()->srr0);
+
+	assert(ins, "Failed instruction fetch\n");
 
 	uval opcode = extract_bits(ins, 0, 6);
 	uval update_bit = extract_bits(ins, 31, 1);
@@ -136,6 +144,16 @@ vmc_vregs_exception(struct vm_class *vmc, struct cpu_thread *thr,
 	assert(rs < 14, "assuming rs is r0 .. r13\n");
 
 	uval val = vr->reg_gprs[rs];
+
+	/* This is emulation of mtmsrd xx, 1, meaning we can only modify EE
+	 * or RI bits.  All other remain unchanged
+	 */
+	assert(((thr->vregs->v_msr ^ val) & MSR_SF) == 0,
+	       "SF bit change, partition bug, it shouldn't try this\n");
+
+	val = ((MSR_EE | MSR_RI) & val) |
+		(thr->vregs->v_msr & ~(MSR_EE|MSR_RI));
+
 
 	set_v_msr(thr, val);
 
