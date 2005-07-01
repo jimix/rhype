@@ -202,6 +202,9 @@ processor */
 /* use first controller-image to replace controller */
 #undef RELOADER
 
+/* size of memory made visible to controller by reloader */
+#undef CONTROLLER_MEM_CHUNKS
+
 /* Default arguments to be passed to an I/O host from controller */
 #undef DEFAULT_LPAR_ARGS
 

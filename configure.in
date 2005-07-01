@@ -72,6 +72,7 @@ AC_SUBST(EXTERNAL_INTERRUPT_CONTROLLER)
 AC_SUBST(IO_XLATE)
 AC_SUBST(CUSTOM_HW)
 AC_SUBST(RELOADER)
+AC_SUBST(CONTROLLER_MEM_CHUNKS)
 AC_SUBST(MACHINE_APPLE)
 AC_SUBST(MACHINE_MAPLE)
 AC_SUBST(MACHINE_MAMBO)
@@ -599,6 +600,16 @@ AC_ARG_WITH(copt,
   [ALL_COPTFLAGS="$withval"],
   [ALL_COPTFLAGS="-g -O2"])
 AC_MSG_RESULT($ALL_COPTFLAGS)
+
+dnl Check for '--with-controller-chunks'
+AC_MSG_CHECKING(Number of chunks for controller)
+AC_ARG_WITH(controller-chunks,
+  [ --with-controller-chunks=NUM Number of chunks to assign to partitions. ],
+  [ CONTROLLER_MEM_CHUNKS="$withval"],
+  [ CONTROLLER_MEM_CHUNKS="1"])
+AC_MSG_RESULT($CONTROLLER_MEM_CHUNKS)
+AC_DEFINE_UNQUOTED(CONTROLLER_MEM_CHUNKS,$CONTROLLER_MEM_CHUNKS)
+
 
 dnl gcc 3.3.[25] barfs on some of the large inlines in the treee
 dnl tell it to not barf unless it's a really large inline
