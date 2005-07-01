@@ -177,6 +177,7 @@ EOF
       ppc64-970*-mambo)
         CUSTOM_HW=mambo_hw.o
 	MACHINE=mambo
+	machine_name_string="Mambo"
 	cat >> confdefs.h <<EOF
 #define MACHINE_NAME_STRING "${machine_name_string}"
 EOF
