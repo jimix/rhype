@@ -33,13 +33,16 @@
 #define HCNT_HPTE_MISS		0x2007 /* HPTE miss */
 #define HCNT_HPTE_INSERT	0x2008 /* HPTE insertion by OS */
 #define HCNT_HPTE_REMOVE	0x2009 /* HPTE removal by OS */
-
+#define HCNT_SYSCALL		0x200a /* Syscall reflection */
 #define HCNT_PRIV_MFMSR		0x200b
 #define HCNT_PRIV_MTMSRD	0x200c
 #define HCNT_PRIV_OTHER		0x200d
 
 #define HCNT_EXT_INT		0x200e
 #define HCNT_MER_TRAP		0x200f
+
+#define HCNT_CALL_VRFID		0x2100
+
 
 #define NUM_COUNTERS		16
 

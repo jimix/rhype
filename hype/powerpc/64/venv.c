@@ -338,6 +338,7 @@ insert_exception(struct cpu_thread *thread, uval exnum)
 	if (!thread->vregs->exception_vectors[exnum])
 		return vregs->active_vsave;
 
+	hit_counter_cond(HCNT_SYSCALL, exnum == EXC_V_SYSCALL);
 
 //	hprintf("%s from 0x%016lx %lx\n", __func__, tca->srr0, exnum);
 

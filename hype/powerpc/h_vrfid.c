@@ -28,7 +28,7 @@
 #include <vdec.h>
 #include <thread_control_area.h>
 #include <cpu_thread_inlines.h>
-
+#include <counter.h>
 sval
 h_vrfid(struct cpu_thread *thread, uval restore_idx, uval new_dec)
 {
@@ -41,7 +41,10 @@ h_vrfid(struct cpu_thread *thread, uval restore_idx, uval new_dec)
 		partition_set_dec(thread, new_dec);
 	}
 
+	hit_counter(HCNT_CALL_VRFID);
+
 	uval val = vr->v_srr1;
+
 	val |= V_LPAR_MSR_ON;
 	val &= ~V_LPAR_MSR_OFF;
 	tca->srr1 = val;
