@@ -32,7 +32,9 @@
 
 #ifdef DEBUG
 
-#define hit_counter(counter_id)					\
+#define hit_counter(counter_id)	hit_counter_cond(counter_id,1)
+
+#define hit_counter_cond(counter_id, cond)			\
 do {								\
 	sval16 cnt;						\
 	asm volatile("50:\n"					\
@@ -43,7 +45,7 @@ do {								\
 		     "	.llong 50b;\n"				\
 		     "	.previous;\n"				\
 		     : "=r" (cnt) : "i" (counter_id));		\
-	if (cnt >= 0 && dbg_counters)				\
+	if (cnt >= 0 && dbg_counters && (cond))			\
 		atomic_add32(&dbg_counters[cnt], 1);		\
 } while (0)
 #else
