@@ -54,7 +54,7 @@ vmc_cache_slbe(struct vm_class* vmc, uval vsid)
 	uval idx = VMC_SLB_CACHE_SIZE;
 	uval cache_val = vsid_class_offset(vsid);
 	for (;i < VMC_SLB_CACHE_SIZE; ++i) {
-		if (vmc->vmc_slb_cache[i] == cache_val) break;
+		if (vmc->vmc_slb_cache[i] == cache_val) return;
 		if (vmc->vmc_slb_cache[i] != VMC_UNUSED_SLB_ENTRY) continue;
 
 		if (i < idx) {

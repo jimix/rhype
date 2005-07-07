@@ -112,15 +112,10 @@ slb_insert_to_slot(uval spot, uval ea, uval8 is_lp, uval8 lp_selection,
 		   uval kp, uval vsid, union slb_entry *slbe_cache)
 {
 	union slb_entry tmp;
-	uval i = 0;
 
 	slb_calc(ea, is_lp, lp_selection, kp, vsid, &tmp);
 
 	assert(slbe_cache, "No slbe cache given\n");
-	for (i = 0; i < SWSLB_SR_NUM; i++) {
-		assert((slbe_cache[i].bits.esid != tmp.bits.esid) ||
-		       spot == i, "Duplicate slb entry\n");
-	}
 
 	set_slb_entry(spot, slbe_cache, &tmp);
 
