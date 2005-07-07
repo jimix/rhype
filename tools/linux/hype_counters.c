@@ -93,6 +93,16 @@ thaw(void)
 	return ret;
 }
 
+static int
+list_counters(void)
+{
+	int x = 0;
+	while (names[x].name) {
+		printf("0x%04lx %s\n", names[x].id, names[x].name);
+		++x;
+	}
+	return 0;
+}
 
 static int
 set_counters(int argc, char **argv)
@@ -169,6 +179,8 @@ main(int argc, char **argv)
 		return thaw();
 	} else if (strcmp("set", argv[0]) == 0) {
 		return set_counters(--argc, ++argv);
+	} else if (strcmp("list", argv[0]) == 0) {
+		return list_counters();
 	} else if (strcmp("get", argv[0]) == 0) {
 		return get_counters();
 	}
