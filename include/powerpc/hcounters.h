@@ -24,25 +24,30 @@
 
 /* PPC definitions go here. */
 
-#define HCNT_HPTE_EVICT		0x2001 /* HPTE evictions */
-#define HCNT_SLB_MISS		0x2002 /* SLB Exceptions */
-#define HCNT_CLASS_CREATE	0x2003 /* create a vm class */
-#define HCNT_CLASS_DESTROY	0x2004 /* destroy a vm class */
-#define HCNT_CLASS_ACTIVATE	0x2005 /* activate a vm class */
-#define HCNT_CLASS_DEACTIVATE	0x2006 /* deactivate a vm class */
-#define HCNT_HPTE_MISS		0x2007 /* HPTE miss */
-#define HCNT_HPTE_INSERT	0x2008 /* HPTE insertion by OS */
-#define HCNT_HPTE_REMOVE	0x2009 /* HPTE removal by OS */
-#define HCNT_SYSCALL		0x200a /* Syscall reflection */
-#define HCNT_PRIV_MFMSR		0x200b
-#define HCNT_PRIV_MTMSRD	0x200c
-#define HCNT_PRIV_OTHER		0x200d
+#define HCNT_SLB_MISS		0x2001 /* SLB Exceptions */
+#define HCNT_CLASS_CREATE	0x2002 /* create a vm class */
+#define HCNT_CLASS_DESTROY	0x2003 /* destroy a vm class */
+#define HCNT_CLASS_ACTIVATE	0x2004 /* activate a vm class */
+#define HCNT_CLASS_DEACTIVATE	0x2005 /* deactivate a vm class */
 
-#define HCNT_EXT_INT		0x200e
-#define HCNT_MER_TRAP		0x200f
+#define HCNT_HPTE_EVICT		0x2020 /* HPTE evictions */
+#define HCNT_HPTE_MISS		0x2021 /* HPTE miss */
+#define HCNT_HPTE_INSERT	0x2022 /* HPTE insertion by OS */
+#define HCNT_HPTE_REMOVE	0x2023 /* HPTE removal by OS */
+#define HCNT_HPTE_MODIFY	0x2024 /* HPTE modification by OS */
 
-#define HCNT_CALL_VRFID		0x2100
+#define HCNT_SYSCALL		0x2030 /* Syscall reflection */
 
+#define HCNT_PRIV_MFMSR		0x2040 /* mfmsr emulation */
+#define HCNT_PRIV_MTMSRD	0x2041 /* mtmsrd emulation */
+#define HCNT_PRIV_OTHER		0x2042 /* other SPR emulation */
+
+#define HCNT_EXT_INT		0x2050 /* external interrupt reflection */
+#define HCNT_DEC_INT		0x2051 /* decrementer interrupt reflection */
+#define HCNT_MER_TRAP		0x2052 /* mediated interrupt delivery */
+
+#define HCNT_CALL_VRFID		0x2100 /* H_VRFID invocation */
+#define HCNT_CALL_MAP_SET	0x2101 /* set EA mapping call */
 
 #define NUM_COUNTERS		16
 

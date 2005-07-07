@@ -23,8 +23,8 @@
 #include <hype.h>
 #include <counter.h>
 
-uval32 *dbg_counters = NULL;
-uval32 __dbg_counters[NUM_COUNTERS] = { 0, };
+struct hcounter *dbg_counters = NULL;
+struct hcounter __dbg_counters[NUM_COUNTERS];
 uval16 dbg_counter_users[NUM_COUNTERS] = { 0, };
 
 lock_t counter_cfg_lock = lock_unlocked;

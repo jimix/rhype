@@ -26,8 +26,14 @@
 
 #include <hcounters.h>
 
-extern uval32 *dbg_counters;
-extern uval32 __dbg_counters[NUM_COUNTERS];
+struct hcounter
+{
+	uval32 hits;
+	uval32 value;
+};
+
+extern struct hcounter *dbg_counters;
+extern struct hcounter __dbg_counters[NUM_COUNTERS];
 extern uval16 dbg_counter_users[NUM_COUNTERS];
 
 extern lock_t counter_cfg_lock;

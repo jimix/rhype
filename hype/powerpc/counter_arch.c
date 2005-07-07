@@ -23,8 +23,8 @@
 #include <hype.h>
 #include <counter.h>
 
-extern unsigned long start__counters[0];
-extern unsigned long end__counters[0];
+extern unsigned long __start___counters[0];
+extern unsigned long __stop___counters[0];
 
 struct counter_fixup
 {
@@ -33,14 +33,16 @@ struct counter_fixup
 };
 
 
-struct counter_fixup* fixup_start = (struct counter_fixup*)&start__counters[0];
-struct counter_fixup* fixup_end = (struct counter_fixup*)&end__counters[0];
+struct counter_fixup* fixup_start = (struct counter_fixup*)&__start___counters[0];
+struct counter_fixup* fixup_end = (struct counter_fixup*)&__stop___counters[0];
 
-static uval32 *counter_ins_addr[NUM_COUNTERS] = { NULL,};
 uval counter_active = 0;
 
 static inline void set_li_val(uval32 *addr, uval16 val)
 {
+	/* modifies the immediate value stored in the "li" instruction
+	 * at "addr", so that the instruction uses "val"
+	 */
 	uval32 instruction = (*addr) & 0xffff0000;
 	instruction |= val;
 	*addr = instruction;
@@ -48,36 +50,36 @@ static inline void set_li_val(uval32 *addr, uval16 val)
 }
 
 
-void
-zap_and_set_counter(uval counter, uval16 type)
+static void
+bind_counter(uval16 counter, uval16 slot)
 {
-	lock_acquire(&counter_cfg_lock);
-
-	if (counter_ins_addr[counter]) {
-		set_li_val(counter_ins_addr[counter], 0xffff);
-	}
 
 	struct counter_fixup *cf = fixup_start;
 	while (cf < fixup_end) {
-		if (type == cf->counter_id) {
-			break;
-
+		if (counter == cf->counter_id) {
+			set_li_val((uval32*)cf->fixup_addr, slot);
 		}
 		++cf;
 	}
+	dbg_counter_users[slot] = counter;
+}
 
-	__dbg_counters[counter] = 0;
-	if (cf == fixup_end) goto done;
 
+void
+zap_and_set_counter(uval slot, uval16 type)
+{
+	lock_acquire(&counter_cfg_lock);
 
-	/* modifies the immediate value stored in the "li" instruction
-	 * at "addr", so that the instruction uses "type"
-	 */
-	set_li_val((uval32*)cf->fixup_addr, counter);
+	if (dbg_counter_users[slot]) {
+		bind_counter(dbg_counter_users[slot], 0xffff);
+	}
 
-	counter_ins_addr[counter] = (uval32*)cf->fixup_addr;
-done:
-	dbg_counter_users[counter] = type;
+	__dbg_counters[slot].hits = 0;
+	__dbg_counters[slot].value = 0;
+
+	if (type != 0) {
+		bind_counter(type, slot);
+	}
 	lock_release(&counter_cfg_lock);
 }
 

@@ -46,7 +46,7 @@ do {								\
 		     "	.previous;\n"				\
 		     : "=r" (cnt) : "i" (counter_id));		\
 	if (cnt >= 0 && dbg_counters && (cond))			\
-		atomic_add32(&dbg_counters[cnt], 1);		\
+		atomic_add32(&dbg_counters[cnt].hits, 1);	\
 } while (0)
 #else
 
