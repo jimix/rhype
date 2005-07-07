@@ -102,7 +102,6 @@ static uval
 vmc_vregs_exception(struct vm_class *vmc, struct cpu_thread *thr,
 		    struct vexc_save_regs *vr, uval eaddr)
 {
-	uval vsid = vmc_class_vsid(thr, vmc, eaddr);
 	union ptel pte;
 	pte.word = 0;
 	pte.bits.rpn = vmc->vmc_data >> LOG_PGSIZE;
@@ -111,7 +110,8 @@ vmc_vregs_exception(struct vm_class *vmc, struct cpu_thread *thr,
 	pte.bits.pp1 = PP_RWRW >> 1;
 
 	if (eaddr >= VREG_BASE) {
-		sval ret = insert_ea_map(thr, vsid, eaddr, 1, pte);
+		sval ret = vmc_set_ea_map(thr, vmc, eaddr,
+					  PTE_VALID|PTE_LOCKED, pte);
 		assert(ret == H_Success,
 		       "Failed on vregs area PTE insertion\n");
 		return vr->reg_gprs[3];
@@ -204,7 +204,7 @@ vmc_create_vregs(struct cpu_thread *thr)
 	pte.bits.bolted = 1;
 	pte.bits.lock = 1;
 
-	union pte * target = locate_clear_lock_target(thr, vpn);
+	union pte * target = locate_clear_lock_target(thr, vpn, 0);
 
 	vmc->protected_pte = target;
 

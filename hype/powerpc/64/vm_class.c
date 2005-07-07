@@ -54,11 +54,17 @@ vmc_destroy(struct cpu_thread *thr, struct vm_class *vmc)
 
 	if (vmc->vmc_num_ptes) {
 		num = htab_purge_vmc(thr, vmc);
+		hprintf("vmc destroy with unevicted PTEs: %x %lx\n",
+			vmc->vmc_num_ptes, num);
 	}
 
 #ifdef HPTE_AGING
 	uval vmc_age = htab_generation(&thr->cpu->os->htab) - vmc->vmc_gen_id;
 	assert(vmc_age < HPTE_PURGE_AGE ||num == 0, "Non-empty VMC\n");
+#else
+	if (num != 0) {
+		hprintf("vmc destroy with valid PTE's\n");
+	}
 #endif
 
 	lock_acquire(&thr->cpu->os->po_mutex);
@@ -179,6 +185,8 @@ vmc_deactivate(struct cpu_thread *thread, struct vm_class *vmc)
 	 * create to restore things when this vmc is activated */
 }
 
+volatile uval no_slb_cache = 0;
+
 void
 vmc_activate(struct cpu_thread *thread, struct vm_class *vmc)
 {
@@ -186,7 +194,8 @@ vmc_activate(struct cpu_thread *thread, struct vm_class *vmc)
 	uval i = 0;
 	hit_counter(HCNT_CLASS_ACTIVATE);
 	vmc_get(vmc);
-	return;
+
+	if (no_slb_cache) return;
 
 	for (; i < SWSLB_SR_NUM; ++i) {
 		union slb_entry *se = &thread->slb_entries[i];
@@ -266,9 +275,6 @@ vmc_reflect_enter(struct vm_class *vmc, struct cpu_thread *thr,
 
 	if (ra == INVALID_PHYSICAL_ADDRESS) return H_Parameter;
 
-	uval vsid = vmc_class_vsid(thr, vmc, ea);
-	if (ra == INVALID_LOGICAL_ADDRESS) return H_Parameter;
-
 	union ptel pte;
 	pte.word = 0;
 	pte.bits.rpn = ra >> LOG_PGSIZE;
@@ -286,18 +292,10 @@ vmc_reflect_enter(struct vm_class *vmc, struct cpu_thread *thr,
 	}
 //	hprintf("reflect request: 0x%lx 0x%lx(0x%lx) id: %lx 0x%llx %x\n",
 //		ea, linux_pte, ra, vmc->vmc_id, pte.word, pte.bits.pp1);
+	hit_counter(HCNT_CALL_MAP_SET);
 
-	sval ret = insert_ea_map(thr, vsid, ea, lpte.bits.present, pte);
-	if (ret == H_Success) {
-		if (lpte.bits.present) {
-			hit_counter(HCNT_HPTE_INSERT);
-			vmc_mark_mapping_insert(vmc, thr);
-
-		} else {
-			hit_counter(HCNT_HPTE_REMOVE);
-			vmc_mark_mapping_evict(vmc);
-		}
-	}
+	uval valid = (lpte.bits.present ? PTE_VALID : 0);
+	sval ret = vmc_set_ea_map(thr, vmc, ea, valid, pte);
 	return ret;
 }
 

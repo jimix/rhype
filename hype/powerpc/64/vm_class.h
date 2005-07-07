@@ -168,10 +168,16 @@ extern void vmc_deactivate(struct cpu_thread *thread, struct vm_class *vmc);
 /* Enable mappings associated with this vmc */
 extern void vmc_activate(struct cpu_thread *thread, struct vm_class *vmc);
 
-extern sval insert_ea_map(struct cpu_thread *thr, uval vsid,
-			  uval ea, uval valid, union ptel pte);
+#define PTE_VALID	1
+#define PTE_LOCKED	2
+#define PTE_BOLTED	4
+extern sval vmc_set_ea_map(struct cpu_thread *thr, struct vm_class* vmc,
+			   uval ea, uval flags, union ptel pte);
 
-extern union pte* locate_clear_lock_target(struct cpu_thread* thr, uval vpn);
+#define LOCATE_MATCH	1	/* return failure if no pte for this vpn */
+#define LOCATE_NO_EVICT	2	/* no eviction if no match found */
+extern union pte* locate_clear_lock_target(struct cpu_thread* thr, uval vpn,
+					   uval flags);
 
 extern uval htab_purge_vmc(struct cpu_thread *thr, struct vm_class* vmc);
 

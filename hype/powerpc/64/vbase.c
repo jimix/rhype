@@ -117,7 +117,7 @@ vm_class_evict_pte(union pte *entry, uval pteg)
 }
 
 union pte*
-locate_clear_lock_target(struct cpu_thread* thr, uval vpn)
+locate_clear_lock_target(struct cpu_thread* thr, uval vpn, uval flags)
 {
 	uval lp = LOG_PGSIZE;  /* FIXME: get large page size */
 
@@ -183,14 +183,22 @@ redo_search:
 		}
 	}
 
-	if (empty != NUM_PTES_IN_PTEG) {
-		target = &ht[pteg + empty];
-		pte_lock(target);
+	target = &ht[pteg + empty];
 
+
+	if (empty != NUM_PTES_IN_PTEG) {
+		if ((flags & LOCATE_MATCH) && target->bits.avpn != avpn)
+			return NULL;
+
+		pte_lock(target);
 		/* Things may have changed since we got the lock */
 		if (target->bits.v && target->bits.avpn != avpn)
 			goto redo_search;
 		return target;
+	}
+
+	if (flags & (LOCATE_MATCH || LOCATE_NO_EVICT)) {
+		return NULL;
 	}
 
 #ifndef HPTE_AGING
@@ -257,9 +265,10 @@ redo_search:
 
 
 sval
-insert_ea_map(struct cpu_thread *thr, uval vsid, uval ea, uval valid,
-	      union ptel entry)
+vmc_set_ea_map(struct cpu_thread *thr, struct vm_class *vmc,
+	       uval ea, uval flags, union ptel entry)
 {
+	uval vsid = vmc_class_vsid(thr, vmc, ea);
 	uval vpn = vpn_from_vsid_ea(vsid, ea);
 
 	union pte pte;
@@ -268,30 +277,59 @@ insert_ea_map(struct cpu_thread *thr, uval vsid, uval ea, uval valid,
 	pte.words.rpnWord = entry.word;
 
 	pte.bits.avpn = (vsid << 5) | VADDR_TO_API(vpn << LOG_PGSIZE);
-	pte.bits.v = valid;
-	pte.bits.bolted = 0;
-	pte.bits.lock = 0;
+	pte.bits.v = (flags & PTE_VALID)!=0;
+	pte.bits.bolted =  (flags & PTE_BOLTED)!=0;
+	pte.bits.lock = (flags & PTE_LOCKED)!=0;
 
 #ifdef HPTE_AGING
 	pte_set_gen(&pte, htab_generation(&thr->cpu->os->htab));
 #endif
+	/* Do an eviction only if we're trying to insert */
+	union pte *target;
+	if (pte.bits.v == 0) {
+		target = locate_clear_lock_target(thr, vpn, LOCATE_MATCH);
+		if (!target) return H_Success;
+	} else {
+		target = locate_clear_lock_target(thr, vpn, 0);
+	}
 
-	union pte *target = locate_clear_lock_target(thr, vpn);
+	assert(target, "No HPTE to work on\n");
+
+	/* If we have already returned it is because there is nothing
+	 * to invalidate
+	 */
+	uval modify = (target->bits.avpn == pte.bits.avpn) && target->bits.v;
+	uval remove = (pte.bits.v == 0) && modify;
+	uval insert = (pte.bits.v == 1) && !modify;
+
 
 	/* Modify and unlock */
 	htab_entry_modify(target, vpn, &pte);
 
-	/* Above call doesn't unlock if pte.bits.v == 0 */
-	if (!valid) {
-		pte_unlock(target);
+	if (insert) {
+		hit_counter(HCNT_HPTE_INSERT);
+		vmc_mark_mapping_insert(vmc, thr);
 #ifdef HPTE_AGING
-	} else {
 		htab_gen_record_add(&thr->cpu->os->htab);
 #endif
+	} else if (remove) {
+		hit_counter(HCNT_HPTE_REMOVE);
+		vmc_mark_mapping_evict(vmc);
+	} else if (modify) {
+		hit_counter(HCNT_HPTE_MODIFY);
 	}
+
+	/* htab_entry_modify only invalidates if pte.bits.v == 0, so
+	 * we must unlock here if appropriate
+	 */
+	if (pte.bits.v == 0 && pte.bits.lock == 0) {
+		pte_unlock(target);
+	}
+
 
 	return H_Success;
 }
+
 
 
 sval
@@ -332,7 +370,6 @@ xh_kern_pgflt(struct cpu_thread* thr, uval type, struct vexc_save_regs *vr)
 	union ptel pte = { .word = 0 };
 	uval la = vmc_xlate(vmc, addr, &pte);
 	uval ra;
-	uval vsid;
 
 	if (la == INVALID_LOGICAL_ADDRESS) {
 		/* If logical address is invalid, and pte is non-zero, then
@@ -353,13 +390,10 @@ xh_kern_pgflt(struct cpu_thread* thr, uval type, struct vexc_save_regs *vr)
 		goto reflect;
 	}
 
-	vsid = vmc_class_vsid(thr, vmc, addr);
-
 	pte.bits.rpn = ra >> LOG_PGSIZE;
 
-	sval ret = insert_ea_map(thr, vsid, addr, 1, pte);
+	sval ret = vmc_set_ea_map(thr, vmc, addr, PTE_VALID, pte);
 	if (ret == H_Success) {
-		vmc_mark_mapping_insert(vmc, thr);
 		return vr->reg_gprs[3];
 	}
 
@@ -381,7 +415,6 @@ reflect:
 
 	return insert_exception(thr, EXC_V_PGFLT);
 }
-
 
 sval
 xh_kern_slb(struct cpu_thread* thread, uval type, struct vexc_save_regs *vr)
