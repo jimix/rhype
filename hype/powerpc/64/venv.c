@@ -320,6 +320,7 @@ deliver_async_exception(struct cpu_thread *thread)
 		 * Clear the PENDING bits only after the new msr has been set
 		 */
 		ret = insert_exception(thread, EXC_V_DEC);
+		hit_counter(HCNT_DEC_INT);
 		clear_vmode_pending(thread, VSTATE_PENDING_DEC);
 	}
 
