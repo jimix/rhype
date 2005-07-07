@@ -40,7 +40,9 @@
 #include <vtty.h>
 #include <partition.h>
 #include <aipc.h>
+#ifdef FORCE_APPLE_MODE
 #include <vm_class.h>
+#endif
 
 /*
  * Hypervisor-call vector.  Provide for multiple vectors to allow

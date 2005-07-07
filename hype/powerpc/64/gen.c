@@ -299,8 +299,9 @@ main(void)
 	DECLARE(CT_DSISR, offsetof(struct cpu_thread, reg_dsisr));
 	DECLARE(CT_CPU, offsetof(struct cpu_thread, cpu));
 
-
+#ifdef FORCE_APPLE_MODE
 	DECLARE(CT_THR_MODE, offsetof(struct cpu_thread, vstate.thread_mode));
+#endif
 
 	DECLARE(PO_STATE, offsetof(struct os, po_state));
 	DECLARE(PO_BOOT_MSR, offsetof(struct os, po_boot_msr));
@@ -320,6 +321,7 @@ main(void)
 			 hcall_6000_vector_len) + 0 * REG_WIDTH);
 
 
+#ifdef FORCE_APPLE_MODE
 	DECLARE(V_ACTIVE_AREA, offsetof(struct vregs, active_vsave));
 	DECLARE(V_BUSY_AREA, offsetof(struct vregs, busy_vsave));
 	DECLARE(V_EXC_SAVE, offsetof(struct vregs, vexc_save));
@@ -346,7 +348,7 @@ main(void)
 	DECLARE(V_DAR, offsetof(struct vregs, v_dar));
 	DECLARE(V_TB_OFFSET, offsetof(struct vregs, v_tb_offset));
 	DECLARE(V_DSISR, offsetof(struct vregs, v_dsisr));
-
+#endif
 
 #ifdef USE_GDB_STUB
 	DECLARE(GDB_MSR, offsetof(struct cpu_state, msr));

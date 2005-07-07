@@ -143,6 +143,7 @@ htab_alloc(struct os *os, uval log_htab_bytes)
 		os->po_lpid, htab_raddr, os->htab.num_ptes);
 }
 
+#ifdef FORCE_APPLE_MODE
 uval
 htab_purge_vmc(struct cpu_thread *thr, struct vm_class* vmc)
 {
@@ -169,7 +170,7 @@ htab_purge_vmc(struct cpu_thread *thr, struct vm_class* vmc)
 	}
 	return num_purged;
 }
-
+#endif
 
 void
 htab_free(struct os *os)

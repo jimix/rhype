@@ -63,9 +63,11 @@ arch_os_init(struct os *newOS, uval pinfo_addr, uval use_rmo)
 
 		newOS->po_boot_msr = MSR_ME;
 		newOS->po_exception_msr = MSR_ME;
+#ifdef FORCE_APPLE_MODE
 	} else {
 		newOS->rmo = INVALID_PHYSICAL_ADDRESS;
 		newOS->po_boot_msr = V_LPAR_MSR_ON;
+#endif
 	}
 
 	newOS->use_large_pages = 1;
