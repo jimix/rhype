@@ -46,6 +46,7 @@ h_create_vm_class(struct cpu_thread* thread,
 
 	vmc = vmc_lookup(thread, id);
 	if (vmc) {
+		vmc_put(vmc);
 		ret = H_UNAVAIL;
 		goto done;
 	}
@@ -75,7 +76,6 @@ h_create_vm_class(struct cpu_thread* thread,
 	}
 
 	ret = H_Success;
-	vmc_put(vmc);
 done:
 	lock_release(&thread->cpu->os->po_mutex);
 	return ret;
