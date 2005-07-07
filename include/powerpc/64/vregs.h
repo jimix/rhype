@@ -50,7 +50,7 @@
  */
 struct vexc_save_regs
 {
-	uval reg_gprs[14] __align_64; /* r0 .. r12 */
+	uval reg_gprs[14] __align_64; /* r0 .. r13 */
 	uval32 reg_xer;
 	uval32 reg_cr;
 	uval reg_lr;
