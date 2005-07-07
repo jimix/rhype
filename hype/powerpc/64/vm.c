@@ -40,7 +40,7 @@ do_tlbie(union pte *pte, uval ptex)
 {
 	uval64 virtualAddress;
 
-	virtualAddress = vpn_from_pte(pte, ptex) << 12;
+	virtualAddress = vpn_from_pte(pte, ptex >> LOG_NUM_PTES_IN_PTEG) << 12;
 	if (pte->bits.l) {
 		virtualAddress |= (pte->bits.rpn & 1);
 		tlbie_large(virtualAddress);
@@ -56,7 +56,7 @@ do_tlbie(union pte *pte, uval ptex)
 void
 pte_tlbie(union pte *pte, struct os *os)
 {
-	uval ptex = (pte - (union pte *)GET_HTAB(os)) >> LOG_PTE_SIZE;
+	uval ptex = (((uval)pte) - ((uval)GET_HTAB(os))) >> LOG_PTE_SIZE;
 
 	pte_invalidate(&os->htab, pte);
 	ptesync();
