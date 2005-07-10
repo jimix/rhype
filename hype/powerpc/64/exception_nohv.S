@@ -451,9 +451,11 @@ kspace_syscall:
 	LOADADDR(r12, xh_syscall)
 	CALL_CFUNC(r12)		
 
+	LDR	r12, TCA_SAVE_AREA(r13)
+	SAVE_GPRS_TO_BUFFER r3, r3, VS_GPRS, r12
+
 	NONSTD_RESTORE_BREAKOUT
 	/* r3 is already set */
-	LDR	r12, TCA_SAVE_AREA(r13)
 
 partial_restore_save_area:	
 	/* r3 is restored (is hcall return val)
@@ -553,22 +555,47 @@ preempt_save:
 
 	/* We don't come back here */
 	b	.
-			
+
 save_all:
 	bl	C_TEXT(rcu_check)
 	LDR	r12, TCA_CPU_THREAD(r13)
 	LDR	r11, TCA_SAVE_AREA(r13)
 	
 	/* preempt this OS */
-	SAVE_GPRS_TO_BUFFER r14, r31, CT_GPRS, r4
+	RESTORE_GPRS_FROM_BUFFER r0, r0, VS_GPRS, r11
+	RESTORE_GPRS_FROM_BUFFER r3, r10, VS_GPRS, r11
+	SAVE_GPRS_TO_BUFFER r0, r0, CT_GPRS, r12
+	SAVE_GPRS_TO_BUFFER r3, r10, CT_GPRS, r12
+
+	LDR	r3, VS_GPRS+(r1*REG_WIDTH)(r11)
+	LDR	r4, VS_GPRS+(r2*REG_WIDTH)(r11)
+	LDR	r5, VS_GPRS+(r11*REG_WIDTH)(r11)
+	LDR	r6, VS_GPRS+(r12*REG_WIDTH)(r11)
+	LDR	r7, VS_GPRS+(r13*REG_WIDTH)(r11)
+	STR	r3, CT_GPR1(r12)
+	STR	r4, CT_GPR2(r12)
+	STR	r5, CT_GPR11(r12)
+	STR	r6, CT_GPR12(r12)
+	STR	r7, CT_GPR13(r12)
+
+	LDR	r3, VS_LR(r11)
+	LDR	r4, VS_CTR(r11)
+	lwz	r5, VS_XER(r11)
+	lwz	r6, VS_CR(r11)
+	STR	r3, CT_LR(r12)
+	STR	r4, CT_CTR(r12)
+	stw	r5, CT_XER(r12)
+	stw	r6, CT_CR(r12)
+
+	SAVE_GPRS_TO_BUFFER r14, r31, CT_GPRS, r12
 
 	LDR	r15, TCA_SRR0(r13)
-	STR	r15, CT_HSRR0(r4)
+	STR	r15, CT_HSRR0(r12)
 
 	LDR	r15, TCA_SRR1(r13)
-	STR	r15, CT_HSRR1(r4)
+	STR	r15, CT_HSRR1(r12)
 
-        mr	r3, r4
+	mr	r3, r12
 	li	r4,0	
 	bl	C_TEXT(preempt_thread)
 
