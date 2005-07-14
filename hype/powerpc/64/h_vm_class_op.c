@@ -58,6 +58,10 @@ h_vm_class_op(struct cpu_thread *thread, uval id,
 		return_arg(thread, 1, htab_generation(&thread->cpu->os->htab));
 		break;
 #endif
+	case H_VMC_TOGGLE_DEBUG:
+		ret = 0;
+		vmc->vmc_flags ^= VMC_DEBUG;
+		break;
 	default:
 		ret = vmc->vmc_ops->vmc_op(vmc, thread, imp_arg1, imp_arg2,
 					   imp_arg3, imp_arg4);
