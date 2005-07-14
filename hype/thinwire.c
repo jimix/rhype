@@ -39,7 +39,7 @@
 /* USE_SIMPLE_WRITE == 1 --> use un-acked writes for console code */
 #define USE_SIMPLE_WRITE	1
 /* IMMEDIATE == 1 --> immediately activate thinwire */
-#define IMMEDIATE		0
+#define IMMEDIATE		1
 
 #ifdef MACHINE_MAMBO
 #undef IMMEDIATE
@@ -601,12 +601,8 @@ activateThinWire(void)
 	/* Change speed */
 	thinwire_ic = (*serial_init_fn)(0, 0, THINWIRE_BAUDRATE);
 
-	uval x = 1<<20;
-	while (x--);
-
 	/* Wait for last message to be replayed at new speed */
 	thinwire_ic->ic_read_all(thinwire_ic, buf, i);
-
 
 #endif
 
