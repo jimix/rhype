@@ -25,6 +25,9 @@
 /* PPC definitions go here. */
 
 #define HCNT_SLB_MISS		0x2001 /* SLB Exceptions */
+#define HCNT_KERNEL_ENTER	0x2002 /* user->kernel transition */
+#define HCNT_KERNEL_EXIT	0x2003 /* kernel->user transition */
+
 #define HCNT_CLASS_CREATE	0x2002 /* create a vm class */
 #define HCNT_CLASS_DESTROY	0x2003 /* destroy a vm class */
 #define HCNT_CLASS_ACTIVATE	0x2004 /* activate a vm class */

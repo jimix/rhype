@@ -23,8 +23,8 @@
 #include <hype.h>
 #include <counter.h>
 
-extern unsigned long __start___counters[0];
-extern unsigned long __stop___counters[0];
+extern struct counter_fixup __start___counters[];
+extern struct counter_fixup __stop___counters[];
 
 struct counter_fixup
 {
@@ -33,8 +33,8 @@ struct counter_fixup
 };
 
 
-struct counter_fixup* fixup_start = (struct counter_fixup*)&__start___counters[0];
-struct counter_fixup* fixup_end = (struct counter_fixup*)&__stop___counters[0];
+const struct counter_fixup* fixup_start = &__start___counters[0];
+const struct counter_fixup* fixup_end = &__stop___counters[0];
 
 uval counter_active = 0;
 
@@ -54,7 +54,7 @@ static void
 bind_counter(uval16 counter, uval16 slot)
 {
 
-	struct counter_fixup *cf = fixup_start;
+	const struct counter_fixup *cf = fixup_start;
 	while (cf < fixup_end) {
 		if (counter == cf->counter_id) {
 			set_li_val((uval32*)cf->fixup_addr, slot);
