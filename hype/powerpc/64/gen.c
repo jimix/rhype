@@ -62,10 +62,6 @@ main(void)
 
 	DECLARE(CPU_OS, offsetof(struct cpu, os));
 
-#ifdef HAS_SWSLB
-	DECLARE(CT_SLB_ENTRIES, offsetof(struct cpu_thread, slb_entries));
-#endif
-
 	DECLARE(CT_GPRS,
 		offsetof(struct cpu_thread, reg_gprs) + 0 * REG_WIDTH);
 	DECLARE(CT_GPR0,

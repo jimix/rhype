@@ -45,12 +45,17 @@
 #include <config.h>
 #include <types.h>
 
+#if !defined(HAS_SWSLB) || SWSLB_SR_NUM != 64
+#error Assuming 64 entry SW SLB for Apple Mode
+#endif
+
 /* lpt : class id : class member : page : page offset */
 /*  5  :    20    :     12       : 28 ----------      */
 struct vstate {
 	uval	thread_mode; /* saved version of tca's vstate */
 	uval	dec_target;
 	struct vm_class* active_cls[NUM_MAP_CLASSES];
+	struct  slb_cache kern_slb_cache;
 };
 
 extern sval vbase_config(struct cpu_thread* thr, uval vbase, uval size);

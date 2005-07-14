@@ -56,97 +56,167 @@ union slb_entry {
 #define slb_esid	words.esid
 };
 
+struct slb_cache
+{
+	union slb_entry entries[SWSLB_SR_NUM];
+	uval64 used_map;
+};
+
+/* This is useful for writing loops that scan an slb cache */
+/* Loop over each bit that is set in "bits".  In the loop body,
+ * "curr_bit" is the index of the current bit.
+ * DONT CHANGE CURR_BIT INSIDE THE LOOP!!!!
+ */
+#define for_each_bit(bits, curr_bit)				\
+	for (curr_bit = bit_log2(bits);				\
+	     bits;						\
+	     bits &= ~(1ULL << curr_bit), curr_bit = bit_log2(bits))
+
+
 
 extern sval hprintf(const char *fmt, ...)
 	__attribute__ ((format(printf, 1, 2), no_instrument_function));
 
-static inline void
-inval_slb_entry(uval index, union slb_entry *cache)
-{
-	if (!cache[index].bits.v) return;
 
-	/* slbie arguments is esid in upper-most 36 bits, followed
-	 * by class bit. */
-	uval64 esid_c = cache[index].words.esid;
-	esid_c &= (~0ULL << 28);
-	if (cache[index].bits.c)
-		esid_c |= 1 << 28;
-
-	__asm__ __volatile__ ("isync\n\t"
-			      "slbie %[esid_c]\n\t"
-			      "isync\n\t"::
-			      [esid_c] "r" (esid_c));
-	cache[index].bits.v = 0;
-	cache[index].words.esid = 0;
-	cache[index].words.vsid = 0;
-
-}
-
+/* In Apple-mode all SLB manipulation is done by HV in real mode, and
+ * since an rfid will be done prior to any SLB entries being used,
+ * there is no need to isync.
+ */
+#ifdef FORCE_APPLE_MODE
+#define ISYNC
+#else
+#define ISYNC "isync\n\t"
+#endif
 
 static inline void
-set_slb_entry(uval index, union slb_entry *cache, union slb_entry *new)
+load_slb_entry(uval index, struct slb_cache *cache)
 {
-	inval_slb_entry(index, cache);
+	if (cache->entries[index].bits.v == 0) return;
 
-	cache[index] = *new;
-	cache[index].bits.index = index;
 	/* *INDENT-OFF* */
 	__asm__ __volatile__(
 		/* FIXME: do we have to isync for every one? */
-		"isync			\n\t"
+		ISYNC
 		"slbmte		%0,%1	\n\t"
-		"isync			\n\t"
+		ISYNC
 		:
-		: "r" (cache[index].words.vsid), "r" (cache[index].words.esid)
+		: "r" (cache->entries[index].words.vsid),
+		  "r" (cache->entries[index].words.esid)
 		: "memory");
 	/* *INDENT-ON* */
 }
 
 static inline void
-load_slb_entry(uval index, union slb_entry *cache)
-{
-	if (cache[index].bits.v == 0) return;
-
-	/* *INDENT-OFF* */
-	__asm__ __volatile__(
-		/* FIXME: do we have to isync for every one? */
-		"isync			\n\t"
-		"slbmte		%0,%1	\n\t"
-		"isync			\n\t"
-		:
-		: "r" (cache[index].words.vsid), "r" (cache[index].words.esid)
-		: "memory");
-	/* *INDENT-ON* */
-}
-
-static inline void
-get_slb_entry(uval index, union slb_entry *cache)
+__get_slb_entry(uval index, union slb_entry *slbe)
 {
 
 	/* *INDENT-OFF* */
 	__asm__ __volatile__("\n\t"
-			     "isync		\n\t"
+			     ISYNC
 			     "slbmfee  %0,%2	\n\t"
 			     "slbmfev  %1,%2	\n\t"
-			     "isync		\n\t"
-			     : "=r" (cache[index].words.esid),
-			       "=r" (cache[index].words.vsid)
+			     ISYNC
+			     : "=r" (slbe->words.esid),
+			       "=r" (slbe->words.vsid)
 			     : "r" (index)
 			     : "memory");
 	/* *INDENT-ON* */
 }
 
+static inline void
+get_slb_entry(uval index, struct slb_cache *cache)
+{
+	__get_slb_entry(index, &cache->entries[index]);
+}
+
+
+static inline void
+inval_slb_cache_entry(uval index, struct slb_cache *cache)
+{
+	union slb_entry *entry = &cache->entries[index];
+
+	entry->words.esid = 0;
+	entry->words.vsid = 0;
+
+	cache->used_map &= ~(1ULL << index);
+}
+
+static inline void
+__inval_slb_entry(uval index, struct slb_cache *cache)
+{
+	union slb_entry *entry = &cache->entries[index];
+
+	if (!entry->bits.v) return;
+
+	/* slbie arguments is esid in upper-most 36 bits, followed
+	 * by class bit. */
+	uval64 esid_c = entry->words.esid;
+	esid_c &= (~0ULL << 28);
+	if (entry->bits.c)
+		esid_c |= 1 << 28;
+
+	__asm__ __volatile__ (ISYNC
+			      "slbie %[esid_c]\n\t"
+			      ISYNC
+			      ::[esid_c] "r" (esid_c));
+}
+
+
+static inline void
+inval_slb_entry(uval index, struct slb_cache *cache)
+{
+	__inval_slb_entry(index, cache);
+	inval_slb_cache_entry(index, cache);
+}
+
+
+static inline void
+set_slb_cache_entry(uval index, struct slb_cache *slbc, union slb_entry *new)
+{
+	slbc->entries[index] = *new;
+	slbc->entries[index].bits.index = index;
+	slbc->used_map |= 1ULL << index;
+}
+
+static inline void
+__set_slb_entry(uval index, struct slb_cache *slbc)
+{
+	/* *INDENT-OFF* */
+	__asm__ __volatile__(
+		/* FIXME: do we have to isync for every one? */
+		ISYNC
+		"slbmte		%0,%1	\n\t"
+		ISYNC
+		:
+		: "r" (slbc->entries[index].words.vsid),
+		  "r" (slbc->entries[index].words.esid)
+		: "memory");
+	/* *INDENT-ON* */
+
+}
+
+static inline void
+set_slb_entry(uval index, struct slb_cache *slbc, union slb_entry *new)
+{
+	__inval_slb_entry(index, slbc);
+
+	set_slb_cache_entry(index, slbc, new);
+	load_slb_entry(index, slbc);
+}
+
+extern void assert_slb_cache(struct slb_cache *slbc);
+extern void slb_dump(struct slb_cache *slbc);
 
 
 void hwMapRange(uval eaddr, uval64 raddr, uval size, /* unused */ int bolted);
 
 /* If vsid == 0 slb insert will make up it's own value */
 extern int slb_insert(uval ea, uval8 is_lp, uval8 lp_selection, uval kp,
-		      uval vsid, union slb_entry* slbe_cache);
+		      uval vsid, struct slb_cache* slbe_cache);
 
 extern int slb_insert_to_slot(uval slot, uval ea, uval8 is_lp,
-			      uval8 lp_selection,
-			      uval kp, uval vsid, union slb_entry* slbe_cache);
+			      uval8 lp_selection, uval kp, uval vsid,
+			      struct slb_cache* slbe_cache);
 
 extern uval get_esid(uval ea);
 extern uval get_vsid(uval ea);

@@ -326,11 +326,15 @@ vmc_set_ea_map(struct cpu_thread *thr, struct vm_class *vmc,
 		pte_unlock(target);
 	}
 
+	vmc_debug(vmc, "VMC %ld HPTE op %lx: HPTE addr: 0x%lx -> 0x%p\n",
+		  vmc->vmc_id,
+		  (insert << 2) | (remove << 1) | modify, ea, target);
 
 	return H_Success;
 }
 
 
+extern uval count;
 
 sval
 xh_kern_pgflt(struct cpu_thread* thr, uval type, struct vexc_save_regs *vr)
@@ -361,6 +365,9 @@ xh_kern_pgflt(struct cpu_thread* thr, uval type, struct vexc_save_regs *vr)
 
 		return insert_debug_exception(thr, V_DEBUG_MEM_FAULT);
 	}
+
+	vmc_debug(vmc, "VMC %ld HPTE miss: addr: 0x%lx\n",
+		  vmc->vmc_id, orig_addr);
 
 	if (vmc->vmc_ops->vmc_exception) {
 		return vmc->vmc_ops->vmc_exception(vmc, thr, vr, orig_addr);
@@ -446,20 +453,28 @@ xh_kern_slb(struct cpu_thread* thread, uval type, struct vexc_save_regs *vr)
 
 	if (!vmc) {
 		hprintf("No vm_class for 0x%lx %lx %lx\n", addr, type, (uval)vr);
-		breakpoint();
 		return insert_debug_exception(thread, V_DEBUG_MEM_FAULT);
 	}
 
+	vmc_debug(vmc, "VMC %ld SLB miss: addr: 0x%lx\n", vmc->vmc_id, addr);
 
 	uval vsid = vmc_class_vsid(thread, vmc, addr);
 
 #ifdef FORCE_4K_PAGES
 	lp = 12;
 	l = 0;
-	spot = slb_insert(seg_base, 0, 0, 1, vsid, thread->slb_entries);
+	spot = slb_insert(seg_base, 0, 0, 1, vsid, &thread->slbcache);
 #else
-	spot = slb_insert(ea, 1, SELECT_LG, 1, vsid, thread->slb_entries);
+	spot = slb_insert(ea, 1, SELECT_LG, 1, vsid, &thread->slbcache);
 #endif
+
+	vmc_flag_slbe(vmc, spot);
+
+	/* vregs has vmc_id == -1, so adding one catches it as well */
+	if (vmc->vmc_id + 1 <= NUM_KERNEL_VMC) {
+		set_slb_cache_entry(spot, &thread->vstate.kern_slb_cache,
+				    &thread->slbcache.entries[spot]);
+	}
 
 	return vr->reg_gprs[3];
 }
@@ -493,3 +508,11 @@ xh_syscall(uval a1, uval a2, uval a3, uval a4, uval a5, uval a6,
 	return ret;
 }
 
+extern void xh_error(struct cpu_thread* thread);
+
+void
+xh_error(struct cpu_thread* thread)
+{
+	(void)thread;
+	breakpoint();
+}

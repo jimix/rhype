@@ -26,7 +26,7 @@
 #include <types.h>
 #include <lib.h>
 #include <mmu.h>
-
+#include <bitops.h>
 
 /* does everything but set the index in the vsid */
 static void
@@ -56,48 +56,43 @@ slb_calc(uval ea, uval8 is_lp, uval8 lp_selection, uval kp, uval vsid,
 
 int
 slb_insert(uval ea, uval8 is_lp, uval8 lp_selection, uval kp, uval vsid,
-	   union slb_entry *slbe_cache)
+	   struct slb_cache *slbc)
 {
 	int i;
-	int spot = 64;
+	int spot = SWSLB_SR_NUM;
 	union slb_entry tmp;
 
 	slb_calc(ea, is_lp, lp_selection, kp, vsid, &tmp);
-	for (i = 0; i < SWSLB_SR_NUM; i++) {
+	uval entries = slbc->used_map;
+	while (entries) {
+		i = bit_log2(entries);
+		entries &= ~(1ULL << i);
+
 		/* The first one (SLB[0] always belongs to the kernel
 		 * and slbia will not invalidate that one
 		 */
-		union slb_entry __tmp;
 		union slb_entry *curr;
-		/* If cache is given, look there */
-		if (slbe_cache) {
-			curr = &slbe_cache[i];
-		} else {
-			get_slb_entry(i, &__tmp);
-			curr = &tmp;
-		}
+		curr = &slbc->entries[i];
 
-
-		/* check if not valid */
-		/* choose lowest empty spot */
-		if (curr->bits.v == 0 && spot > i) {
-			spot = i;
-		}
 		if (tmp.bits.esid == curr->bits.esid) {
 			spot = i;
-			break;
 		}
 
 	}
 
+	if (spot == SWSLB_SR_NUM) {
+		spot = bit_log2(~slbc->used_map);
+	}
+
+
 	if (spot < SWSLB_SR_NUM) {
 		tmp.bits.index = spot;
-		if (tmp.words.esid == slbe_cache[spot].words.esid &&
-		    tmp.words.vsid == slbe_cache[spot].words.vsid) {
+		if (tmp.words.esid == slbc->entries[spot].words.esid &&
+		    tmp.words.vsid == slbc->entries[spot].words.vsid) {
 			return spot;
 		}
 
-		set_slb_entry(spot, slbe_cache, &tmp);
+		set_slb_entry(spot, slbc, &tmp);
 		return spot;
 	}
 
@@ -109,15 +104,73 @@ slb_insert(uval ea, uval8 is_lp, uval8 lp_selection, uval kp, uval vsid,
 
 int
 slb_insert_to_slot(uval spot, uval ea, uval8 is_lp, uval8 lp_selection,
-		   uval kp, uval vsid, union slb_entry *slbe_cache)
+		   uval kp, uval vsid, struct slb_cache *slbc)
 {
 	union slb_entry tmp;
 
 	slb_calc(ea, is_lp, lp_selection, kp, vsid, &tmp);
 
-	assert(slbe_cache, "No slbe cache given\n");
+	assert(slbc, "No slbe cache given\n");
 
-	set_slb_entry(spot, slbe_cache, &tmp);
+	set_slb_entry(spot, slbc, &tmp);
 
 	return spot;
+}
+void
+assert_slb_cache(struct slb_cache *slbc)
+{
+	int i;
+	int j;
+	for (i = 0; i < SWSLB_SR_NUM; j++) {
+		union slb_entry *curr = &slbc->entries[i];
+		union slb_entry hw;
+		__get_slb_entry(i, &hw);
+		assert(hw.bits.v == curr->bits.v , "Valid entry mismatch\n");
+
+		for (j = i + 1; j < SWSLB_SR_NUM; j++) {
+			assert(slbc->entries[j].bits.esid != curr->bits.esid,
+			       "Duplicate ESID in slb cache\n");
+
+		}
+
+	}
+
+}
+
+void
+slb_dump(struct slb_cache *slbc)
+{
+	int i;
+	for (i = 0; i < SWSLB_SR_NUM; i++) {
+		union slb_entry *curr = &slbc->entries[i];
+		union slb_entry hw;
+		__get_slb_entry(i, &hw);
+		if (curr->words.vsid || curr->words.esid) {
+			hprintf("C %2d: %013llx %x %x %x %x %x %09llx %x %03x\n",
+				i, curr->bits.vsid,
+				curr->bits.ks,
+				curr->bits.kp,
+				curr->bits.n,
+				curr->bits.l,
+				curr->bits.c,
+				curr->bits.esid,
+				curr->bits.v,
+				curr->bits.index);
+		}
+		hw.bits.index = curr->bits.index;
+		if (hw.words.vsid != curr->words.vsid ||
+		    hw.words.esid != curr->words.esid) {
+			hprintf("H %2d: %013llx %x %x %x %x %x %09llx %x %03x\n",
+				i, hw.bits.vsid,
+				hw.bits.ks,
+				hw.bits.kp,
+				hw.bits.n,
+				hw.bits.l,
+				hw.bits.c,
+				hw.bits.esid,
+				hw.bits.v,
+				hw.bits.index);
+		}
+	}
+
 }

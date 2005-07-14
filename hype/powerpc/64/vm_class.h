@@ -123,6 +123,7 @@ struct vm_class_ops
 #define VMC_UNUSED_SLB_ENTRY	0xffff
 
 #define VMC_INVALID	0x1
+#define VMC_DEBUG	0x2
 struct vm_class {
 	struct hash_entry vmc_hash;
 #define vmc_id vmc_hash.he_key
@@ -134,7 +135,7 @@ struct vm_class {
 	uval64 vmc_gen_id;	/* generation id of last insertion */
 #endif
 	uval32 vmc_num_ptes; /* number of pte's inserted by class */
-	uval64 vmc_slb_entries;
+	uval vmc_slb_entries;
 	uval16 vmc_slb_cache[VMC_SLB_CACHE_SIZE];
 	uval vmc_data;	/* implementation specific data */
 	struct vm_class_ops *vmc_ops;
@@ -156,9 +157,6 @@ extern struct vm_class* vmc_create_reflect(uval id, uval ea_base, uval size);
 
 extern struct vm_class* find_kernel_vmc(struct cpu_thread* thr, uval eaddr);
 extern struct vm_class* find_app_vmc(struct cpu_thread* thr, uval eaddr);
-
-extern void vmc_enter_kernel(struct cpu_thread *thread);
-extern void vmc_exit_kernel(struct cpu_thread *thread);
 
 extern sval vmc_destroy(struct cpu_thread *thread, struct vm_class *vmc);
 

@@ -114,7 +114,7 @@ struct cpu_thread {
 	uval reg_gprs[32] __align_64;
 	uval reg_sprg[4] __align_64;
 #ifdef HAS_SWSLB
-	union slb_entry slb_entries[SWSLB_SR_NUM] __align_64;
+	struct slb_cache slbcache __align_64;
 #endif
 	struct cpu *cpu;
 	uval reg_lr;

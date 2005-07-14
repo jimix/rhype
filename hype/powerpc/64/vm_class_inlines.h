@@ -34,6 +34,13 @@
 #include <cpu_thread.h>
 #include <vm_class.h>
 
+#define vmc_debug(vmc, args...)						\
+	do {								\
+		if (0 &&(vmc->vmc_flags & VMC_DEBUG))			\
+			hprintf(args);					\
+	} while (0)
+
+
 static inline void
 vmc_put(struct vm_class *vmc)
 {
@@ -46,25 +53,10 @@ vmc_get(struct vm_class *vmc)
 	atomic_add32(&vmc->vmc_active_count, 1);
 }
 
-
 static inline void
-vmc_cache_slbe(struct vm_class* vmc, uval vsid)
+vmc_flag_slbe(struct vm_class* vmc, uval spot)
 {
-	uval i = 0;
-	uval idx = VMC_SLB_CACHE_SIZE;
-	uval cache_val = vsid_class_offset(vsid);
-	for (;i < VMC_SLB_CACHE_SIZE; ++i) {
-		if (vmc->vmc_slb_cache[i] == cache_val) return;
-		if (vmc->vmc_slb_cache[i] != VMC_UNUSED_SLB_ENTRY) continue;
-
-		if (i < idx) {
-			idx = i;
-		}
-
-	}
-	if (idx < VMC_SLB_CACHE_SIZE) {
-		vmc->vmc_slb_cache[idx] = cache_val;
-	}
+	set_bit(vmc->vmc_slb_entries, 1ULL << spot);
 }
 
 static inline uval

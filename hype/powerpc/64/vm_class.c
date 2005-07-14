@@ -157,6 +157,8 @@ void
 vmc_deactivate(struct cpu_thread *thread, struct vm_class *vmc)
 {
 	uval i = 0;
+	uval idx = 0;
+
 	hit_counter(HCNT_CLASS_DEACTIVATE);
 
 	/* The vmc is responsible for all vsids in its range, even
@@ -164,25 +166,33 @@ vmc_deactivate(struct cpu_thread *thread, struct vm_class *vmc)
 	 */
 
 	/* clear the cache */
-	memset(&vmc->vmc_slb_cache[0], 0xff, sizeof(vmc->vmc_slb_cache));
+	if (vmc->vmc_slb_entries) {
+		memset(&vmc->vmc_slb_cache[0], 0xff,
+		       sizeof(vmc->vmc_slb_cache));
+	}
 
-	for (; i < SWSLB_SR_NUM; ++i) {
-		union slb_entry *se = &thread->slb_entries[i];
+	uval entries = vmc->vmc_slb_entries;
+	for_each_bit(entries, i) {
+		union slb_entry *se = &thread->slbcache.entries[i];
 		if (!se->bits.v) continue;
 
 		if (vsid_class_id(se->bits.vsid) != vmc->vmc_id)
 			continue;
 
-		/* remember the entry for the cache */
-		vmc_cache_slbe(vmc, se->bits.vsid);
+		if (idx < VMC_SLB_CACHE_SIZE) {
+			vmc->vmc_slb_cache[idx] =
+				vsid_class_offset(se->bits.vsid);
+			++idx;
+		}
+		inval_slb_entry(i, &thread->slbcache);
+		if (vmc->vmc_id < NUM_KERNEL_VMC) {
+			inval_slb_cache_entry(i,
+					      &thread->vstate.kern_slb_cache);
+		}
 
-		inval_slb_entry(i, thread->slb_entries);
 	}
-	vmc->vmc_slb_entries = 0;
-	vmc_put(vmc);
 
-	/* preserve vmc_slb_cache, it tells us which slb entries we should
-	 * create to restore things when this vmc is activated */
+	vmc_put(vmc);
 }
 
 volatile uval no_slb_cache = 0;
@@ -195,17 +205,20 @@ vmc_activate(struct cpu_thread *thread, struct vm_class *vmc)
 	hit_counter(HCNT_CLASS_ACTIVATE);
 	vmc_get(vmc);
 
+	vmc->vmc_slb_entries = 0;
+
 	if (no_slb_cache) return;
 
-	for (; i < SWSLB_SR_NUM; ++i) {
-		union slb_entry *se = &thread->slb_entries[i];
+	while (vmc->vmc_slb_cache[idx] != VMC_UNUSED_SLB_ENTRY &&
+	       idx < VMC_SLB_CACHE_SIZE) {
 
-		if (se->bits.v == 1) continue;
+		i = bit_log2(~thread->slbcache.used_map);
 
-		while (vmc->vmc_slb_cache[idx] == VMC_UNUSED_SLB_ENTRY &&
-		       idx++ < VMC_SLB_CACHE_SIZE);
+		union slb_entry *se = &thread->slbcache.entries[i];
 
-		/* nothing else to restore */
+		assert(se->bits.v == 0, "used_map is incorrect\n");
+
+		if (vmc->vmc_slb_cache[idx] == VMC_UNUSED_SLB_ENTRY) break;
 		if (idx == VMC_SLB_CACHE_SIZE) break;
 
 		uval ea = (vmc->vmc_slb_cache[idx] * SEGMENT_SIZE)
@@ -225,42 +238,18 @@ vmc_activate(struct cpu_thread *thread, struct vm_class *vmc)
 #ifdef FORCE_4K_PAGES
 		lp = 12;
 		l = 0;
-		slb_insert_to_slot(i, ea, 0, 0, 1, vsid, thread->slb_entries);
+		slb_insert_to_slot(i, ea, 0, 0, 1, vsid, &thread->slbcache);
 #else
 		slb_insert_to_slot(i, ea, 1, SELECT_LG, 1, vsid,
-				   thread->slb_entries);
+				   &thread->slbcache);
 #endif
 
+		vmc_flag_slbe(vmc, i);
 		++idx;
 
 	}
 
 }
-
-
-void
-vmc_enter_kernel(struct cpu_thread *thread)
-{
-	uval i = 0;
-	vmc_activate(thread, thread->vmc_vregs);
-	for (; i < NUM_KERNEL_VMC; ++i) {
-		if (!thread->cpu->os->vmc_kernel[i]) continue;
-		vmc_activate(thread, thread->cpu->os->vmc_kernel[i]);
-	}
-}
-
-void
-vmc_exit_kernel(struct cpu_thread *thread)
-{
-	uval i = 0;
-	for (; i < NUM_KERNEL_VMC; ++i) {
-		if (!thread->cpu->os->vmc_kernel[i]) continue;
-		vmc_deactivate(thread, thread->cpu->os->vmc_kernel[i]);
-	}
-	vmc_deactivate(thread, thread->vmc_vregs);
-
-}
-
 
 static inline sval
 vmc_reflect_enter(struct vm_class *vmc, struct cpu_thread *thr,
@@ -298,6 +287,7 @@ vmc_reflect_enter(struct vm_class *vmc, struct cpu_thread *thr,
 	sval ret = vmc_set_ea_map(thr, vmc, ea, valid, pte);
 	return ret;
 }
+
 
 static sval
 vmc_reflect_op(struct vm_class *vmc, struct cpu_thread* thread,

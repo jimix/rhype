@@ -41,16 +41,45 @@
 
 sval xh_kern_prog_ex(struct cpu_thread* thread, uval addr);
 
+static void
+enter_kernel(struct cpu_thread *thread)
+{
+	uval i = 0;
+	struct slb_cache *k = &thread->vstate.kern_slb_cache;
+	struct slb_cache* c = &thread->slbcache;
+	uval map = k->used_map;
+	for_each_bit(map, i) {
+		if (c->entries[i].bits.v) {
+			inval_slb_cache_entry(i, k);
+		} else {
+			set_slb_entry(i, c, &k->entries[i]);
+		}
+	}
+	set_vmode_bit(thread, VSTATE_KERN_MODE);
+	hit_counter(HCNT_KERNEL_ENTER);
+
+}
+
+static void
+exit_kernel(struct cpu_thread *thread)
+{
+	uval i = 0;
+	uval map = thread->vstate.kern_slb_cache.used_map;
+	for_each_bit(map ,i) {
+		inval_slb_entry(i, &thread->slbcache);
+	}
+	clear_vmode_bit(thread, VSTATE_KERN_MODE);
+	hit_counter(HCNT_KERNEL_EXIT);
+}
+
 inline void
 set_v_msr(struct cpu_thread* thr, uval val)
 {
 	if ((val ^ thr->vregs->v_msr) & MSR_PR) {
 		if (val & MSR_PR) {
-			vmc_exit_kernel(thr);
-			clear_vmode_bit(thr, VSTATE_KERN_MODE);
+			exit_kernel(thr);
 		} else {
-			vmc_enter_kernel(thr);
-			set_vmode_bit(thr, VSTATE_KERN_MODE);
+			enter_kernel(thr);
 		}
 	}
 
@@ -84,7 +113,7 @@ mtgpr(struct cpu_thread* thr, uval gpr, uval val)
 static inline uval
 mfgpr(struct cpu_thread* thr, uval gpr)
 {
-	uval val;
+	uval val = 0;
 	switch (gpr) {
 	case 14 ... 31:
 		val = thr->reg_gprs[gpr];
@@ -327,7 +356,6 @@ deliver_async_exception(struct cpu_thread *thread)
 	return ret;
 }
 
-
 sval
 insert_exception(struct cpu_thread *thread, uval exnum)
 {
@@ -335,7 +363,6 @@ insert_exception(struct cpu_thread *thread, uval exnum)
 	struct vregs* vregs = tca->vregs;
 	struct vexc_save_regs* vr = tca->save_area;
 
-//	hprintf("Reflect exception: %ld %x\n", exnum, vr->exc_num);
 	if (!thread->vregs->exception_vectors[exnum])
 		return vregs->active_vsave;
 
