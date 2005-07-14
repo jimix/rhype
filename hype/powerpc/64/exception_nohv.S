@@ -86,26 +86,6 @@
 	bne-	alternate_restore
 .endm
 	
-.macro MEM_EXCEPTION_HANDLER type, func
-	SAVE_SPECIALS_TO_VREGS r12, r11
-	SAVE_GPRS_TO_BUFFER r0, r10, VS_GPRS, r11
-	SAVE_R11_R13_TO_BUFFER r12, VS_GPRS, r11
-	LDR	r1,TCA_HYPE_STACK(r13) 	/* get stack pointer */
-	li	r4, \type
-	LDR	r3, TCA_CPU_THREAD(r13)
-	mr	r5, r11
-	LOADADDR(r6, \func)
-	CALL_CFUNC(r6)
-
-	NONSTD_RESTORE_BREAKOUT
-
-	LDR	r12, TCA_SAVE_AREA(r13)
-	/* handler function returns value of r3 */
-	b	partial_restore_save_area
-.endm
-
-	
-			
 .macro  RESTORE_SPECIALS_FROM_VREGS scratch, vregs
 	LDR	\scratch, VS_LR(\vregs)
 	mtlr	\scratch	
@@ -117,6 +97,21 @@
 	mtcr	\scratch
 .endm
 
+
+.macro GET_SAVE_AREA_PTR dest, vregs, tmp
+	LDR	\tmp, V_ACTIVE_AREA(\vregs)
+	addi	\tmp, \tmp, 1
+	tdeqi	\tmp, NUM_EXC_SAVES-1
+	andi.	\tmp, \tmp, NUM_EXC_SAVES - 1
+	mulli	\tmp, \tmp, VS_SIZE
+	add	\dest, \tmp, \vregs
+	/* dest = &tca->vregs[(vregs->active_vsave + 1) & (NUM_EXC_SAVES-1)] */
+.endm
+	
+/* Jump to the real entry prolog */
+.macro HYPE_JUMP_ENTRY vec, cont, gdb_breakout
+	ba	\cont
+.endm
 
 /* this will make the following things happen:
  * r13 = address of the TCA
@@ -132,17 +127,25 @@
  * If thread is in user mode, will go to "reflect_exception"
  */
 
-.macro HYPE_COMMON_PROLOG vec, gdb_breakout
+.macro HYPE_UNIFIED_PROLOG vec, gdb_breakout
 	mtspr	SPRN_SPRG3, r13
 	mtspr	SPRN_SPRG2, r12
 	mtspr	SPRN_SPRG1, r11
 	mfspr	r12, SPRN_SPRG0
+
+	mfmsr	r13		 /* We're not really able to enable RI, */
+	ori	r13, r13, MSR_RI /* but do it as early as possible ; */
+	mtmsrd	r13, 1           /* any traps here should dump us to gdb */
+
 	mfcr	r13	/* andi. will modify cr */
 .if \gdb_breakout
 #ifdef USE_GDB_STUB
+.if \gdb_breakout - 1
+.else
 	mfsrr1	r11
 	andi.	r11, r11, MSR_PR
 	bne	1f
+.endif
 	li	r11, \vec
 	ba	ex_gdb_save
 1:
@@ -150,12 +153,7 @@
 .endif
 	LDR	r11, TCA_VREGS(r12)
 
-	LDR	r12, V_ACTIVE_AREA(r11)
-	addi	r12, r12, 1
-	tdeqi	r12, NUM_EXC_SAVES-1
-	andi.	r12, r12, NUM_EXC_SAVES - 1
-	mulli	r12, r12, VS_SIZE
-	add	r11, r12, r11
+	GET_SAVE_AREA_PTR r11, r11, r12
 	/* r11 = &tca->vregs[(vregs->active_vsave + 1) & (NUM_EXC_SAVES-1)] */
 
 	stw	r13, VS_CR(r11)
@@ -173,6 +171,65 @@
 	STR	r12, VS_SRR1(r11)
 	STR	r12, TCA_SRR1(r13)
 .endm
+
+/* Try to do a bit of entry processing right away, then jump */
+.macro HYPE_SPLIT_ENTRY vec, cont, gdb_breakout
+	mtspr	SPRN_SPRG3, r13
+	mtspr	SPRN_SPRG2, r12
+	mtspr	SPRN_SPRG1, r11
+	mfspr	r12, SPRN_SPRG0
+
+	mfmsr	r13		 /* We're not really able to enable RI, */
+	ori	r13, r13, MSR_RI /* but do it as early as possible ; */
+	mtmsrd	r13, 1           /* any traps here should dump us to gdb */
+
+	mfcr	r13	/* andi. will modify cr */
+.if \gdb_breakout
+#ifdef USE_GDB_STUB
+/* .if \gdb_breakout - 1 */
+/* .else */
+	mfsrr1	r11
+	andi.	r11, r11, MSR_PR
+	bne	1f
+/* .endif */
+	li	r11, \vec
+	ba	ex_gdb_save
+1:
+#endif /* USE_GDB_STUB */
+.endif
+	li	r11, \vec
+	stw	r11, TCA_EXC_NUM(r12)
+	LDR	r11, TCA_VREGS(r12)
+	ba	\cont
+.endm
+
+/* This is where we land from a HYPE_SPLIT_ENTRY */
+.macro HYPE_SPLIT_PROLOG vec, gdb_breakout
+	GET_SAVE_AREA_PTR r11, r11, r12
+
+	stw	r13, VS_CR(r11)
+
+	mfspr	r13, SPRN_SPRG0	/* get r13 for good */
+	STR	r11, TCA_SAVE_AREA(r13)
+	lwz	r12, TCA_EXC_NUM(r13)
+	stw	r12, VS_EXC_NUM(r11)
+
+	mfsrr0	r12
+	STR	r12, VS_SRR0(r11)
+	STR	r12, TCA_SRR0(r13)
+	mfsrr1	r12
+	STR	r12, VS_SRR1(r11)
+	STR	r12, TCA_SRR1(r13)
+.endm
+
+//#define SPLIT_PROLOG
+#ifndef SPLIT_PROLOG
+#define HYPE_ENTRY HYPE_JUMP_ENTRY
+#define HYPE_COMMON_PROLOG HYPE_UNIFIED_PROLOG
+#else /* SPLIT_PROLOG */
+#define HYPE_ENTRY HYPE_SPLIT_ENTRY
+#define HYPE_COMMON_PROLOG HYPE_SPLIT_PROLOG
+#endif /* SPLIT_PROLOG */	
 
 	
 		
@@ -218,7 +275,8 @@ C_TEXT_ENTRY(sys_reset)
 ### FIXME:	Need code here to detect if we are here for thread
 ###		awake or a true reset.
 ex_sysreset:
-        mfspr r12, SPRN_PIR
+#if 0
+	        mfspr r12, SPRN_PIR
 	LOADADDR(r13, tca_table)
 	LDR	r13, 0(r13)
 	sldi	r12,r12,3	# log2 of 8 for a uval in 64 bit mode
@@ -229,53 +287,86 @@ ex_sysreset:
 	ba .thread_init
         .long 0	
 
+	. = 0x100	# System reset
+#endif
+	HYPE_SPLIT_ENTRY 0x100, ex_error, 1
+
 	. = 0x200	# Machine Check
-	ba	ex_machcheck
+	HYPE_SPLIT_ENTRY 0x200, ex_error, 1
 
 	. = 0x300
-	ba	ex_dsi
+	HYPE_ENTRY 0x300, ex_dsi, 0
 
 	. = 0x380
-	ba	ex_data_slb
+	HYPE_ENTRY 0x380, ex_data_slb, 1
 
 	. = 0x400
-	ba	ex_isi
+	HYPE_ENTRY 0x400, ex_isi, 1
 
 	. = 0x480
-	ba	ex_inst_slb
+	HYPE_ENTRY 0x480, ex_inst_slb, 1
 
 	. = 0x500
-	ba	ex_interrupt
+	HYPE_ENTRY 0x500, ex_interrupt, 1
 
 	. = 0x600
-	ba	ex_alignment
+	HYPE_ENTRY 0x600, ex_alignment, 1
 
 	. = 0x700
-	ba	ex_program
+	HYPE_ENTRY 0x700, ex_program, 1
 
 	. = 0x800
-	ba	ex_float
+	HYPE_ENTRY 0x800, ex_float, 1
 
 	. = 0x900
-	ba	ex_dec
+	HYPE_ENTRY 0x900, ex_dec, 1
 
 	. = 0xc00
-	ba	ex_syscall
+	HYPE_ENTRY 0xc00, ex_syscall, 1
 	
 	. = 0xd00
-	ba	ex_trace
+	HYPE_SPLIT_ENTRY 0xd00, ex_error, 1
 	
 	. = 0xe00
-	ba	ex_fp
+	HYPE_SPLIT_ENTRY 0xe00, ex_error, 1
 
 	. = 0xf20
-	ba	ex_altivec
+	HYPE_ENTRY 0xf20, ex_altivec, 1
 	
+	. = 0x1300
+	HYPE_SPLIT_ENTRY 0x1300, ex_error, 1
+
+	. = 0x1500
+	HYPE_SPLIT_ENTRY 0x1500, ex_error, 1
+
+	. = 0x1600
+	HYPE_SPLIT_ENTRY 0x1600, ex_error, 1
+
 	. = 0x1700
-	ba	ex_altivec_assist
+	HYPE_ENTRY 0x1700, ex_altivec_assist, 1
 				
-ex_machcheck:
-	HYPE_PROLOG 0x200, force_gdb_reflect, 1
+	. = 0x1800
+	HYPE_SPLIT_ENTRY 0x1800, ex_error, 1
+
+
+	
+.macro MEM_EXCEPTION_HANDLER type, func
+	SAVE_SPECIALS_TO_VREGS r12, r11
+	SAVE_GPRS_TO_BUFFER r0, r10, VS_GPRS, r11
+	SAVE_R11_R13_TO_BUFFER r12, VS_GPRS, r11
+	LDR	r1,TCA_HYPE_STACK(r13) 	/* get stack pointer */
+	li	r4, \type
+	LDR	r3, TCA_CPU_THREAD(r13)
+	mr	r5, r11
+	LOADADDR(r6, \func)
+	CALL_CFUNC(r6)
+
+	NONSTD_RESTORE_BREAKOUT
+
+	LDR	r12, TCA_SAVE_AREA(r13)
+	/* handler function returns value of r3 */
+	b	partial_restore_save_area
+.endm
 	
 ex_dsi:
 	HYPE_COMMON_PROLOG 0x300, 0
@@ -312,12 +403,6 @@ ex_syscall:
 	HYPE_CONDITIONAL_PROLOG 0xc00, VSTATE_KERN_MODE, \
 				uspace_syscall, kspace_syscall, 0
 	
-ex_trace:
-	HYPE_PROLOG 0xd00, force_gdb_reflect, 0
-	
-ex_fp:
-	HYPE_PROLOG 0xe00, force_gdb_reflect, 0
-
 ex_altivec:
 	HYPE_PROLOG 0xf20, altivec_reflect, 0
 
@@ -329,7 +414,6 @@ ex_altivec_assist:
 hype_vecend:			# but some stuff here so we see the next symbol
 	.long 0xdeadbeef
 	.long 0xdeadbeef
-
 
 kspace_prog_ex:
 	/* This could be a user-space trap */
@@ -391,7 +475,19 @@ pre_handle_external:
 	NONSTD_RESTORE_BREAKOUT 
 
 	b	partial_restore_save_area
-	
+
+ex_error:
+	HYPE_SPLIT_PROLOG 0, 0 /* HYPE_SPLIT_PROLOG ignores args */
+	SAVE_SPECIALS_TO_VREGS r12, r11
+	SAVE_GPRS_TO_BUFFER r0, r10, VS_GPRS, r11
+	SAVE_R11_R13_TO_BUFFER r12, VS_GPRS, r11
+
+	LDR	r3, TCA_CPU_THREAD(r13)
+	LDR	r1, TCA_HYPE_STACK(r13) /* get stack pointer */
+	LOADADDR(r4, xh_error)
+	CALL_CFUNC(r4)
+		
+		
 force_gdb_reflect:	
 uspace_prog_ex:
 	SAVE_VOLATILES_AND_REFLECT_EXCEPTION EXC_V_DEBUG
