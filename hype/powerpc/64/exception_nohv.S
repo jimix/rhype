@@ -140,12 +140,9 @@
 	mfcr	r13	/* andi. will modify cr */
 .if \gdb_breakout
 #ifdef USE_GDB_STUB
-.if \gdb_breakout - 1
-.else
 	mfsrr1	r11
 	andi.	r11, r11, MSR_PR
 	bne	1f
-.endif
 	li	r11, \vec
 	ba	ex_gdb_save
 1:
@@ -186,12 +183,9 @@
 	mfcr	r13	/* andi. will modify cr */
 .if \gdb_breakout
 #ifdef USE_GDB_STUB
-/* .if \gdb_breakout - 1 */
-/* .else */
 	mfsrr1	r11
 	andi.	r11, r11, MSR_PR
 	bne	1f
-/* .endif */
 	li	r11, \vec
 	ba	ex_gdb_save
 1:
@@ -222,7 +216,7 @@
 	STR	r12, TCA_SRR1(r13)
 .endm
 
-//#define SPLIT_PROLOG
+/*#define SPLIT_PROLOG*/
 #ifndef SPLIT_PROLOG
 #define HYPE_ENTRY HYPE_JUMP_ENTRY
 #define HYPE_COMMON_PROLOG HYPE_UNIFIED_PROLOG
@@ -295,7 +289,7 @@ ex_sysreset:
 	HYPE_SPLIT_ENTRY 0x200, ex_error, 1
 
 	. = 0x300
-	HYPE_ENTRY 0x300, ex_dsi, 0
+	HYPE_ENTRY 0x300, ex_dsi, 1
 
 	. = 0x380
 	HYPE_ENTRY 0x380, ex_data_slb, 1
