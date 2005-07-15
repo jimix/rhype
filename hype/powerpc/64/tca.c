@@ -106,7 +106,7 @@ preempt_thread(struct cpu_thread *thread, uval timer)
 	assert(!(thread->vstate.thread_mode & VSTATE_ACTIVE_DEC),
 	       "Expected hdec to be in the decrementer\n");
 
-	sync_from_dec();
+	sync_from_dec(thread);
 #endif
 
 	/* if this was a yield, release the CPU */

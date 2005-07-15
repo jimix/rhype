@@ -149,7 +149,7 @@ decode_spr_ins(struct cpu_thread* thr, uval addr, uval32 ins)
 	uval gpr  = extract_bits(ins, 6, 5);
 	uval spr = (spr_0_4 << 5) | spr_5_9;
 
-	sync_from_dec();
+	sync_from_dec(thr);
 
 	/* mfmsr */
 	if (opcode == 31 && type == 83) {
@@ -374,7 +374,6 @@ insert_exception(struct cpu_thread *thread, uval exnum)
 
 	assert(tca->srr0 != 0xf000000000000000, "bad reflection");
 
-
 	/* Provide accurate trap bits */
 	vr->v_srr1 = vregs->v_msr | (MSR_TRAP_BITS & tca->srr1);
 
@@ -401,7 +400,7 @@ insert_exception(struct cpu_thread *thread, uval exnum)
 	tca->srr0 = vregs->exception_vectors[exnum];
 
 	/* Make vregs->v_dec match current dec value */
-	sync_from_dec();
+	sync_from_dec(thread);
 
 
 	vr->prev_vsave = vregs->active_vsave;

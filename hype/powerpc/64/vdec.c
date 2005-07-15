@@ -32,24 +32,24 @@
 #include <cpu_thread_inlines.h>
 
 inline void
-sync_from_dec(void)
+sync_from_dec(struct cpu_thread * thread)
 {
 	struct thread_control_area *tca = get_tca();
 	uval diff;
-	if (tca->active_thread->vstate.thread_mode & VSTATE_ACTIVE_DEC) {
-		diff = tca->active_thread->vdec - mfdec();
+	if (thread->vstate.thread_mode & VSTATE_ACTIVE_DEC) {
+		diff = thread->vdec - mfdec();
 	} else {
 		diff = tca->hdec - mfdec();
 	}
 //	hprintf("%s: %x %x %x\n", __func__, tca->hdec, tca->vregs->v_dec, tca->active_thread->vdec);
 
 	tca->hdec -= diff;
-	if (tca->active_thread->vdec >= 0) {
-		tca->active_thread->vdec -= diff;
-		tca->vregs->v_dec = tca->active_thread->vdec;
-		if (tca->active_thread->vdec < 0) {
-			tca->active_thread->vdec = 0;
-			tca->vregs->v_dec = 0;
+	if (thread->vdec >= 0) {
+		thread->vdec -= diff;
+		thread->vregs->v_dec = thread->vdec;
+		if (thread->vdec < 0) {
+			thread->vdec = 0;
+			thread->vregs->v_dec = 0;
 		}
 	}
 
@@ -81,7 +81,7 @@ mthdec(uval32 val)
 void
 partition_set_dec(struct cpu_thread *thr, uval32 val)
 {
-	sync_from_dec();
+	sync_from_dec(thr);
 	if (0 > (sval32)val) {
 		val = -1;
 	} else {
