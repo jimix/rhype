@@ -149,13 +149,15 @@ get_counters(void)
 		       ret, hargs.retval);
 
 		if (hargs.args[1]) {
-			const char* name = counter_to_name(hargs.args[1]);
+			const char* name = counter_to_name(hargs.args[0]);
 			if (name) {
-				printf("%2lx: %28s %6ld\n",
-				       idx, name, hargs.args[0]);
+				printf("%2lx: %28s %12ld %12ld\n",
+				       idx, name, hargs.args[1],
+				       hargs.args[2]);
 			} else {
-				printf("%2lx: %28lx %6ld\n",
-				       idx, hargs.args[1], hargs.args[0]);
+				printf("%2lx: %28lx %12ld %12ld\n",
+				       idx, hargs.args[0],
+				       hargs.args[1], hargs.args[2]);
 			}
 		}
 
