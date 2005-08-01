@@ -484,8 +484,8 @@ save_props(void *m, ofdn_t n, phandle pkg)
 	const char devtype_str[] = "device_type";
 
 	/* get first */
-	ret = call_of("nextprop", 3, 1, &result, pkg, 0, name);
-	assert(ret == OF_SUCCESS, "nextprop");
+	result = of_nextprop(pkg, 0, name);
+	assert(result != OF_FAILURE, "nextprop");
 
 	while (result > 0) {
 		sval32 actual;
@@ -510,9 +510,9 @@ save_props(void *m, ofdn_t n, phandle pkg)
 				assert((uval)sz <= sizeof(obj),
 				       "obj array not big enough for 0x%x\n",
 				       sz);
-				ret = call_of("getprop", 4, 1, &actual,
-					      pkg, name, obj, sz);
-				assert(ret == OF_SUCCESS, "getprop");
+				actual = of_getprop(pkg, name, obj, sz);
+				assert(actual != OF_FAILURE, "getprop: %s %x",
+				       name, actual);
 				assert(actual <= sz, "obj too small");
 			}
 			if (strncmp(name, name_str, sizeof(name_str))==0) {
@@ -524,8 +524,8 @@ save_props(void *m, ofdn_t n, phandle pkg)
 			pos = ofd_prop_add(m, n, name, obj, actual);
 			assert(pos != 0, "prop_create");
 		}
-		ret = call_of("nextprop", 3, 1, &result, pkg, name, name);
-		assert(ret == OF_SUCCESS, "nextprop");
+		result = of_nextprop(pkg, name, name);
+		assert(result != OF_FAILURE, "nextprop: %x", result);
 	}
 
 //	assert(found_device_type, "Missing device type!\n");
@@ -651,12 +651,10 @@ add_hype_props(void *m, ofdn_t n, uval arg)
 static sval
 ofd_path_get(phandle pkg, char *path, uval len)
 {
-	sval ret;
 	sval32 sz;
 
-	ret = call_of("package-to-path", 3, 1, &sz,
-		      pkg, path, len);
-	if (ret == (sval32)OF_FAILURE) {
+	sz = of_package_to_path(pkg, path, len);
+	if (sz == (sval32)OF_FAILURE) {
 		assert(0, "of_peer: failed\n");
 		return 0;
 	}
@@ -674,15 +672,14 @@ do_pkg(void *m, ofdn_t n, phandle p, char *path, uval psz)
 {
 	phandle pnext;
 	ofdn_t nnext;
-	sval r;
 	sval32 sz;
 
 retry:
 	save_props(m, n, p);
 
 	/* do children first */
-	r = call_of("child", 1, 1, &pnext, p);
-	assert(r == OF_SUCCESS, "OF child failed\n");
+	pnext = of_getchild(p);
+	assert(pnext != OF_FAILURE, "OF child failed\n");
 
 	if (pnext != 0) {
 		sz = ofd_path_get(pnext, path, psz);
@@ -695,8 +692,8 @@ retry:
 	}
 
 	/* do peer */
-	r = call_of("peer", 1, 1, &pnext, p);
-	assert(r == OF_SUCCESS, "OF peer failed\n");
+	pnext = of_getpeer(p);
+	assert(pnext != OF_FAILURE, "OF peer failed\n");
 
 	if (pnext != 0) {
 		sz = ofd_path_get(pnext, path, psz);
@@ -718,8 +715,9 @@ pkg_save(void *mem)
 	sval r;
 
 	/* get root */
-	r = call_of("peer", 1, 1, &root, 0);
-	assert(r == OF_SUCCESS, "OF peer for root failed\n");
+	//call_of("peer", 1, 1, &root, 0);
+	root = of_finddevice("/");
+	assert(root != OF_FAILURE, "OF peer for root failed\n");
 
 	do_pkg(mem, OFD_ROOT, root, path, sizeof(path));
 
@@ -811,9 +809,11 @@ static void
 boot_fixup_of_refs(void *mem)
 {
 	/* get root */
-	phandle root = 0;
+	phandle root = of_finddevice("/");
+#if 0
 	sval r = call_of("peer", 1, 1, &root, 0);
 	assert(r == OF_SUCCESS, "OF peer for root failed\n");
+#endif
 	of_walk_tree(root, fixup_refs, (uval)mem);
 }
 
