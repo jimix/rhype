@@ -124,7 +124,6 @@ locate_clear_lock_target(struct cpu_thread* thr, uval vpn, uval flags)
 	int j = 0;
 	union pte *target;
 	int empty;
-	uval verbose = 0;
 	uval vsid = vpn >> (LOG_SEGMENT_SIZE - LOG_PGSIZE);
 	uval log_ht_size = bit_log2(thr->cpu->os->htab.num_ptes)+ LOG_PTE_SIZE;
 	uval pteg = NUM_PTES_IN_PTEG * get_pteg(vpn << LOG_PGSIZE,
@@ -148,47 +147,31 @@ redo_search:
 
 	target = &ht[pteg];
 
+	uval matched = NUM_PTES_IN_PTEG;
+	uval free_mask = 0;
+	uval locked_mask = 0;
 
 	for (; j < NUM_PTES_IN_PTEG; ++j, ++target) {
-		if (verbose) {
-			uval x = vpn_from_pte(target, pteg);
-
-			uval v = x >> (LOG_SEGMENT_SIZE - LOG_PGSIZE);
-			hprintf("PTE for: 0x%lx/0x%lx/0x%lx 0x%lx\n",
-				vsid_lpid_id(v),
-				vsid_class_id(v),
-				vsid_class_offset(v), x);
-		}
-
-#ifdef HPTE_AGING
-		/* Mark in bitmap age of each entry */
-		/* Oldest entries in most-significant bits, so a log operation
-		 * will give us a good choice for eviction */
-		{
-			uval age = now - pte_age(target, now);
-			ages |= (1 << (j + 8 * age));
-		}
-#endif
-
 		if (target->bits.avpn == avpn) {
-			empty = j;
-			break;
+			matched = j;
 		}
 		if (pte_islocked(target)) {
-			continue;
-		}
-
-		if (j < empty && target->bits.v == 0) {
-			empty = j;
+			locked_mask |= 1 << (NUM_PTES_IN_PTEG - 1 - j);
+		} else if (target->bits.v == 0) {
+			free_mask |= 1 << (NUM_PTES_IN_PTEG - 1 - j);
 		}
 	}
 
-	target = &ht[pteg + empty];
+	if ((flags & LOCATE_MATCH) && matched == NUM_PTES_IN_PTEG)
+		return NULL;
 
-
-	if (empty != NUM_PTES_IN_PTEG) {
-		if ((flags & LOCATE_MATCH) && target->bits.avpn != avpn)
-			return NULL;
+	if (matched < NUM_PTES_IN_PTEG || free_mask) {
+		if (matched < NUM_PTES_IN_PTEG) {
+			target = &ht[pteg + matched];
+		} else {
+			uval idx = NUM_PTES_IN_PTEG - bit_log2(free_mask) - 1;
+			target = &ht[pteg + idx];
+		}
 
 		pte_lock(target);
 		/* Things may have changed since we got the lock */
@@ -197,20 +180,23 @@ redo_search:
 		return target;
 	}
 
-	if (flags & (LOCATE_MATCH || LOCATE_NO_EVICT)) {
+
+	if (flags & LOCATE_NO_EVICT) {
 		return NULL;
 	}
 
 #ifndef HPTE_AGING
+
 	/* Random eviction */
+	uval pick = 0;
 	do {
 		/* This ensures that we randomly pick empty,
 		 * but never pick the same value twice
 		 * consecutively */
-		empty = ((~empty) ^ mftb()) & (NUM_PTES_IN_PTEG-1);
-		target = &ht[pteg + empty];
+		pick = ((~pick) ^ mftb()) & (NUM_PTES_IN_PTEG-1);
+		target = &ht[pteg + pick];
 	} while (!pte_trylock(target));
-#else
+#else /* HPTE_AGING */
 	/* Use aging facilities to find eviction target */
 
 	/* First try to scan the entire PTEG */
@@ -288,7 +274,10 @@ vmc_set_ea_map(struct cpu_thread *thr, struct vm_class *vmc,
 	union pte *target;
 	if (pte.bits.v == 0) {
 		target = locate_clear_lock_target(thr, vpn, LOCATE_MATCH);
-		if (!target) return H_Success;
+		if (!target) {
+			hit_counter(HCNT_HPTE_NOOP);
+			return H_Success;
+		}
 	} else {
 		target = locate_clear_lock_target(thr, vpn, 0);
 	}
@@ -317,7 +306,10 @@ vmc_set_ea_map(struct cpu_thread *thr, struct vm_class *vmc,
 		vmc_mark_mapping_evict(vmc);
 	} else if (modify) {
 		hit_counter(HCNT_HPTE_MODIFY);
+	} else {
+		hit_counter(HCNT_HPTE_NOOP);
 	}
+
 
 	/* htab_entry_modify only invalidates if pte.bits.v == 0, so
 	 * we must unlock here if appropriate
@@ -334,16 +326,13 @@ vmc_set_ea_map(struct cpu_thread *thr, struct vm_class *vmc,
 }
 
 
-extern uval count;
-
-sval
-xh_kern_pgflt(struct cpu_thread* thr, uval type, struct vexc_save_regs *vr)
+static inline sval
+__xh_kern_pgflt(struct cpu_thread* thr, uval type, struct vexc_save_regs *vr)
 {
 	struct vm_class *vmc = NULL;
 	uval orig_addr;
 	struct thread_control_area *tca = get_tca();
 
-	hit_counter(HCNT_HPTE_MISS);
 
 	if (type == 1) {
 		orig_addr = mfdar();
@@ -424,13 +413,24 @@ reflect:
 }
 
 sval
+xh_kern_pgflt(struct cpu_thread* thr, uval type, struct vexc_save_regs *vr)
+{
+	sval ret = 0;
+	start_timing_counter(HCNT_HPTE_MISS);
+	ret = __xh_kern_pgflt(thr, type, vr);
+	end_timing_counter(HCNT_HPTE_MISS);
+	return ret;
+}
+
+
+sval
 xh_kern_slb(struct cpu_thread* thread, uval type, struct vexc_save_regs *vr)
 {
+	start_timing_counter(HCNT_SLB_MISS);
+
 	struct vm_class *vmc = NULL;
 	struct thread_control_area *tca = get_tca();
 	uval addr;
-
-	hit_counter(HCNT_SLB_MISS);
 
 	if (type == 1) {
 		addr = mfdar();
@@ -453,6 +453,7 @@ xh_kern_slb(struct cpu_thread* thread, uval type, struct vexc_save_regs *vr)
 
 	if (!vmc) {
 		hprintf("No vm_class for 0x%lx %lx %lx\n", addr, type, (uval)vr);
+		breakpoint();
 		return insert_debug_exception(thread, V_DEBUG_MEM_FAULT);
 	}
 
@@ -476,6 +477,7 @@ xh_kern_slb(struct cpu_thread* thread, uval type, struct vexc_save_regs *vr)
 				    &thread->slbcache.entries[spot]);
 	}
 
+	end_timing_counter(HCNT_SLB_MISS);
 	return vr->reg_gprs[3];
 }
 
