@@ -558,7 +558,7 @@ ofd_chosen_props(void *m)
 	ofdn_t n;
 	ofdn_t p;
 	static const char path[] = "/chosen";
-	static const char console[] = " console=hvc0 nosmp";
+	static const char console[] = " console=hvc nosmp";
 	char b[257];
 	uval sz = 0;
 
