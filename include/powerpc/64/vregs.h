@@ -59,6 +59,10 @@ struct vexc_save_regs
 	uval v_srr1;
 	uval32 prev_vsave;
 	uval32 exc_num;
+	uval scratch1;
+	uval scratch2;
+	uval scratch3;
+	uval scratch4;
 };
 
 struct vregs {
