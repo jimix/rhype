@@ -29,7 +29,7 @@
 struct hcounter
 {
 	uval32 hits;
-	uval32 value;
+	uval value;
 };
 
 extern struct hcounter *dbg_counters;

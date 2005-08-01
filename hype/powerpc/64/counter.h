@@ -34,9 +34,10 @@
 
 #define hit_counter(counter_id)	hit_counter_cond(counter_id,1)
 
-#define hit_counter_cond(counter_id, cond)			\
-do {								\
-	sval16 cnt;						\
+
+#define counter_id(name)					\
+({								\
+	sval16 cnt = -1;					\
 	asm volatile("50:\n"					\
 		     "	li %0, -1\n"				\
 		     "	.section __counters,\"a\";\n"		\
@@ -44,13 +45,49 @@ do {								\
 		     "	.llong %1;\n"				\
 		     "	.llong 50b;\n"				\
 		     "	.previous;\n"				\
-		     : "=r" (cnt) : "i" (counter_id));		\
-	if (cnt >= 0 && dbg_counters && (cond))			\
-		atomic_add32(&dbg_counters[cnt].hits, 1);	\
+		     : "=r" (cnt) : "i" (name));		\
+	cnt;							\
+})								\
+
+
+
+#define hit_counter_cond_action(name, cond, action)		\
+do {								\
+	sval16 cnt = counter_id(name);				\
+	if (likely(cnt < 0)) break;				\
+	if (unlikely(dbg_counters == NULL)) break;		\
+	if (!(cond)) break;					\
+	atomic_add32(&dbg_counters[cnt].hits, 1);		\
+	action;							\
 } while (0)
+
+#define hit_counter_cond(name, cond) hit_counter_cond_action(name, cond,)
+
+#define add_counter_val_cond(name, val, cond)			\
+do {								\
+	sval16 cnt = counter_id(name);				\
+	if (likely(cnt < 0)) break;				\
+	if (unlikely(dbg_counters == NULL)) break;		\
+	if (!(cond)) break;					\
+	atomic_add(&dbg_counters[cnt].value, val);		\
+} while (0);
+
+#define start_timing_counter(name)				\
+	uval __tmp_##name = 0;					\
+	hit_counter_cond_action(name, 1, __tmp_##name = mftb());
+
+
+#define end_timing_counter(name)				\
+	add_counter_val_cond(name, mftb() - __tmp_##name, 1);
+
+
 #else
 
 #define hit_counter(counter_id)
+#define hit_counter_cond(name, cond)
+#define start_timing_counter(name)
+#define end_timing_counter(name)
+#define hit_counter_cond_action(name, cond, action)
 
 #endif /* DEBUG */
 

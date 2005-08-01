@@ -255,14 +255,19 @@ static inline sval
 vmc_reflect_enter(struct vm_class *vmc, struct cpu_thread *thr,
 		  uval ea, uval linux_pte)
 {
+	start_timing_counter(HCNT_CALL_MAP_SET);
+
 	union linux_pte lpte = { .word = linux_pte };
-
-
+	sval ret;
 	uval lp = LOG_PGSIZE;  /* FIXME: get large page size */
 	uval la = lpte.bits.rpn << LOG_PGSIZE;
 	uval ra = logical_to_physical_address(thr->cpu->os, la, 1ULL << lp);
 
-	if (ra == INVALID_PHYSICAL_ADDRESS) return H_Parameter;
+	if (ra == INVALID_PHYSICAL_ADDRESS && lpte.bits.present) {
+		ret = H_Parameter;
+		goto done;
+	}
+
 
 	union ptel pte;
 	pte.word = 0;
@@ -281,10 +286,12 @@ vmc_reflect_enter(struct vm_class *vmc, struct cpu_thread *thr,
 	}
 //	hprintf("reflect request: 0x%lx 0x%lx(0x%lx) id: %lx 0x%llx %x\n",
 //		ea, linux_pte, ra, vmc->vmc_id, pte.word, pte.bits.pp1);
-	hit_counter(HCNT_CALL_MAP_SET);
 
 	uval valid = (lpte.bits.present ? PTE_VALID : 0);
-	sval ret = vmc_set_ea_map(thr, vmc, ea, valid, pte);
+	ret = vmc_set_ea_map(thr, vmc, ea, valid, pte);
+done:
+	end_timing_counter(HCNT_CALL_MAP_SET);
+
 	return ret;
 }
 

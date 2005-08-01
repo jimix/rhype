@@ -22,5 +22,9 @@
 #define __HCOUNTERS__
 
 /* Architecture neutral counter definitions go here. */
+#define HCNT_COUNTER_TOGGLE	0x1000	/* number of times counters thawed
+					   when frozen, time since thaw
+					   is set as the counter's value */
+
 
 #endif

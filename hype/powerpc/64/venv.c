@@ -44,6 +44,7 @@ sval xh_kern_prog_ex(struct cpu_thread* thread, uval addr);
 static void
 enter_kernel(struct cpu_thread *thread)
 {
+	start_timing_counter(HCNT_KERNEL_ENTER);
 	uval i = 0;
 	struct slb_cache *k = &thread->vstate.kern_slb_cache;
 	struct slb_cache* c = &thread->slbcache;
@@ -56,20 +57,20 @@ enter_kernel(struct cpu_thread *thread)
 		}
 	}
 	set_vmode_bit(thread, VSTATE_KERN_MODE);
-	hit_counter(HCNT_KERNEL_ENTER);
-
+	end_timing_counter(HCNT_KERNEL_ENTER);
 }
 
 static void
 exit_kernel(struct cpu_thread *thread)
 {
+	start_timing_counter(HCNT_KERNEL_EXIT);
 	uval i = 0;
 	uval map = thread->vstate.kern_slb_cache.used_map;
 	for_each_bit(map ,i) {
 		inval_slb_entry(i, &thread->slbcache);
 	}
 	clear_vmode_bit(thread, VSTATE_KERN_MODE);
-	hit_counter(HCNT_KERNEL_EXIT);
+	end_timing_counter(HCNT_KERNEL_EXIT);
 }
 
 inline void
@@ -315,6 +316,7 @@ abort:
 sval
 xh_kern_prog_ex(struct cpu_thread* thread, uval addr)
 {
+	start_timing_counter(HCNT_PROG_EXC);
 	uval32 ins;
 	struct thread_control_area *tca = get_tca();
 
@@ -327,7 +329,9 @@ xh_kern_prog_ex(struct cpu_thread* thread, uval addr)
 	if (ins == 0) goto abort;
 
 	ret = decode_spr_ins(thread, addr, ins);
-	if (ret == 0) return -1;
+	if (ret != 0) goto abort;
+	end_timing_counter(HCNT_PROG_EXC);
+	return -1;
 abort:
 	return insert_exception(thread, EXC_V_DEBUG);
 }

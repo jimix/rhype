@@ -48,6 +48,8 @@ probe_regs(struct cpu_thread *thread, uval target, uval start)
 }
 #endif
 
+static uval thaw_time;
+
 sval
 h_debug(struct cpu_thread *thread, uval cmd, uval arg1,
 	uval arg2, uval arg3, uval arg4)
@@ -70,20 +72,23 @@ h_debug(struct cpu_thread *thread, uval cmd, uval arg1,
 		resetThinwire();
 		break;
 #endif
-	case H_COUNTER_FREEZE:
-		freeze_all_counters();
-		break;
 	case H_COUNTER_SET:
 		if (arg1 >= NUM_COUNTERS) return H_Parameter;
 		zap_and_set_counter(arg1, arg2);
 		break;
 	case H_COUNTER_THAW:
 		thaw_all_counters();
+		hit_counter(HCNT_COUNTER_TOGGLE);
+		thaw_time = mftb();
+		break;
+	case H_COUNTER_FREEZE:
+		add_counter_val_cond(HCNT_COUNTER_TOGGLE, mftb()-thaw_time, 1);
+		freeze_all_counters();
 		break;
 	case H_COUNTER_GET:
 		if (arg1 >= NUM_COUNTERS) return H_Parameter;
-		return_arg(thread, 1, __dbg_counters[arg1].hits);
-		return_arg(thread, 2, dbg_counter_users[arg1]);
+		return_arg(thread, 1, dbg_counter_users[arg1]);
+		return_arg(thread, 2, __dbg_counters[arg1].hits);
 		return_arg(thread, 3, __dbg_counters[arg1].value);
 		break;
 #endif

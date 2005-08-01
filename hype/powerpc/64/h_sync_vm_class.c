@@ -28,11 +28,12 @@
 #include <thread_control_area.h>
 #include <vm_class.h>
 #include <vm_class_inlines.h>
-
+#include <counter.h>
 
 sval
 h_sync_vm_class(struct cpu_thread *thread)
 {
+	start_timing_counter(HCNT_CALL_VMC_SYNC);
 	struct vregs *v = thread->vregs;
 	uval i = 0;
 
@@ -64,6 +65,7 @@ h_sync_vm_class(struct cpu_thread *thread)
 		vmc_put(vmc);
 	}
 
+	end_timing_counter(HCNT_CALL_VMC_SYNC);
 	return H_Success;
 
 }
