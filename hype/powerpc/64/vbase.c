@@ -311,7 +311,7 @@ vmc_set_ea_map(struct cpu_thread *thr, struct vm_class *vmc,
 	}
 
 
-	/* htab_entry_modify only invalidates if pte.bits.v == 0, so
+	/* htab_entry_modify only invalidates if pte.bits.v == 1, so
 	 * we must unlock here if appropriate
 	 */
 	if (pte.bits.v == 0 && pte.bits.lock == 0) {
@@ -350,8 +350,6 @@ __xh_kern_pgflt(struct cpu_thread* thr, uval type, struct vexc_save_regs *vr)
 
 	if (!vmc) {
 		hprintf("No vm_class for 0x%lx\n", orig_addr);
-		breakpoint();
-
 		return insert_debug_exception(thr, V_DEBUG_MEM_FAULT);
 	}
 
@@ -453,7 +451,6 @@ xh_kern_slb(struct cpu_thread* thread, uval type, struct vexc_save_regs *vr)
 
 	if (!vmc) {
 		hprintf("No vm_class for 0x%lx %lx %lx\n", addr, type, (uval)vr);
-		breakpoint();
 		return insert_debug_exception(thread, V_DEBUG_MEM_FAULT);
 	}
 
