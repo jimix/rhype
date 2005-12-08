@@ -276,9 +276,15 @@
 
 /* VM CLASS definitions */
 #define VM_CLASS_LPID_BITS	4
+#ifdef LINUX_2_6_13
+#define VM_CLASS_ID_BITS	17
+#define VM_CLASS_BITS		16
+#define VM_CLASS_SPACE_SIZE_BITS	44
+#else
 #define VM_CLASS_ID_BITS	20
 #define VM_CLASS_BITS		13
 #define VM_CLASS_SPACE_SIZE_BITS	41
+#endif
 
 
 /* x86 flags */

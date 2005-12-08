@@ -34,8 +34,14 @@
 #include <cpu_thread.h>
 
 #define VM_CLASS_LPID_BITS	4
+#ifdef LINUX_2_6_13
+#define VM_CLASS_ID_BITS	17
+#define VM_CLASS_BITS		16
+#else
 #define VM_CLASS_ID_BITS	20
 #define VM_CLASS_BITS		13
+#endif
+
 #define VM_CLASS_SIZE	(1ULL << (VM_CLASS_BITS + LOG_SEGMENT_SIZE))
 union vm_class_vsid
 {
