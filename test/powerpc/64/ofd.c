@@ -550,7 +550,7 @@ ofd_xics_props(void *m)
 }
 
 
-extern char default_bootargs[256];
+extern char default_bootargs[512];
 
 static ofdn_t
 ofd_chosen_props(void *m)
@@ -559,7 +559,7 @@ ofd_chosen_props(void *m)
 	ofdn_t p;
 	static const char path[] = "/chosen";
 	static const char console[] = " console=hvc nosmp";
-	char b[257];
+	char b[513];
 	uval sz = 0;
 
 //		" root=/dev/hda "
@@ -580,10 +580,11 @@ ofd_chosen_props(void *m)
 	}
 
 	sz = strlen(default_bootargs);
-	memcpy(b, default_bootargs, sz);
 
-	assert(sz + sizeof(console) <= 256,
+	assert(sz + sizeof(console) <= 512,
 	       "boot args not big enough\n");
+
+	memcpy(b, default_bootargs, sz);
 
 	memcpy(b + sz, console, sizeof (console));
 	sz += sizeof (console);

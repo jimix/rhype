@@ -47,7 +47,7 @@ extern uval gdb_stub_load(uval laddr, uval size);
 extern char *image_names[];
 extern uval image_cnt;
 
-char default_bootargs[256] = DEFAULT_LPAR_ARGS;
+char default_bootargs[512] = DEFAULT_LPAR_ARGS;
 
 extern uval curslots;
 struct partition_status partitions[MAX_MANAGED_PARTITIONS];
