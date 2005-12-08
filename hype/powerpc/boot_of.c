@@ -49,6 +49,15 @@ struct boot_of {
 static struct boot_of bof;
 static ofdn_t boot_cpu;
 
+
+static phandle serial_node = OF_FAILURE;
+
+static int node_is_private(phandle node)
+{
+	return node == serial_node;
+}
+
+
 #ifdef HV_USES_RTAS
 static sval32 rtas_halt = -1;
 static sval32 rtas_reboot = -1;
@@ -299,6 +308,8 @@ find_serial(void)
 	return ofout;
 }
 
+
+
 static struct io_chan *
 probe_serial(phandle node, uval32 phys_size)
 {
@@ -314,6 +325,9 @@ probe_serial(phandle node, uval32 phys_size)
 	struct io_chan *(*init_fn) (uval io_addr, uval32 clock,
 				    uval32 baudrate);
 	struct io_chan *c;
+
+	if (serial_node != OF_FAILURE)
+		return NULL;
 
 	type[0] = 0;
 	of_getprop(node, "device_type", type, sizeof (type));
@@ -419,6 +433,8 @@ probe_serial(phandle node, uval32 phys_size)
 	debug_printf("serialPortAddr %lx\n", io_addr);
 	debug_printf("clock-frequency: %x\n", clock);
 	debug_printf("baudrate: %d\n", baudrate);
+
+	serial_node = node;
 
 	serial_init_fn = init_fn;
 
@@ -681,26 +697,30 @@ retry:
 	pnext = of_getchild(p);
 	assert(pnext != OF_FAILURE, "OF child failed\n");
 
-	if (pnext != 0) {
+	if (pnext != 0  && !node_is_private(pnext)) {
 		sz = ofd_path_get(pnext, path, psz);
 		assert(sz > 0, "bad path\n");
 
 		nnext = ofd_node_child_create(m, n, path, sz);
 		assert(nnext != 0, "out of mem\n");
-
 		do_pkg(m, nnext, pnext, path, psz);
 	}
 
 	/* do peer */
+next_peer:
 	pnext = of_getpeer(p);
 	assert(pnext != OF_FAILURE, "OF peer failed\n");
 
 	if (pnext != 0) {
+
+		if (node_is_private(pnext)) {
+			goto next_peer;
+		}
+
 		sz = ofd_path_get(pnext, path, psz);
 
 		nnext = ofd_node_peer_create(m, n, path, sz);
 		assert(nnext > 0, "out of mem\n");
-
 		n = nnext;
 		p = pnext;
 		goto retry;
