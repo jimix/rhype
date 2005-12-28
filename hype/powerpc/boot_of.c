@@ -34,6 +34,9 @@
 #include <asm.h>
 #include <thinwire.h>
 
+/* Note this is not in BSS! And is thus not cleared */
+static char bootargs[512] __attribute__((section("__builtin_cmdline"))) = {0,};
+
 struct boot_of {
 	uval bo_r3;
 	uval bo_r4;
@@ -93,6 +96,13 @@ boot_init(uval r3, uval r4, uval r5, uval r6, uval r7, uval boot_msr)
 	bof.bo_r6 = r6;
 	bof.bo_r7 = r7;
 	bof.bo_msr = boot_msr;
+
+	if (bof.bo_r6 && bof.bo_r7) {
+		uval min = bof.bo_r7;
+		if (min <= sizeof(bootargs)) {
+			memcpy(bootargs, (char*)bof.bo_r6, min);
+		}
+	}
 
 	/* Initialize the OF client layer */
 	of_init(r5, boot_msr);
@@ -877,6 +887,27 @@ boot_fixup_chosen(void *mem)
 	return rc;
 }
 
+
+static uval
+boot_fixup_bootargs(void *mem)
+{
+	ofdn_t dn;
+	ofdn_t dc;
+	hprintf("Given bootargs: '%s'\n", bootargs);
+
+	if (!bootargs[0]) return 0;
+
+
+	dn = ofd_node_find(mem, "/chosen");
+	assert(dn != OF_FAILURE, "no /chosen node\n");
+
+	dc = ofd_prop_add(mem, dn, "bootargs", &bootargs, sizeof (bootargs));
+	assert(dc != OF_FAILURE,
+	       "could not fix /chosen/bootargs\n");
+	return 1;
+}
+
+
 sval
 boot_devtree(uval of_mem, uval sz)
 {
@@ -891,6 +922,7 @@ boot_devtree(uval of_mem, uval sz)
 
 	boot_fixup_of_refs(mem);
 	boot_fixup_chosen(mem);
+	boot_fixup_bootargs(mem);
 
 	ofd_walk(mem, OFD_ROOT, add_hype_props, 2);
 
@@ -1003,6 +1035,7 @@ boot_controller(uval *start, uval *end)
 		*start = (uval)_controller_start;
 		*end = (uval)_controller_end;
 	}
+
 	return *end - *start;
 }
 
