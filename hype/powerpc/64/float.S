@@ -25,6 +25,10 @@
 
 #ifdef HAS_FP			
 save_fp:	
+	/* Thread could be NULL */
+	cmpdi	r3,0
+	beqlr
+
 	stfd	f0,CT_FPR0(r3)
 	stfd	f1,CT_FPR1(r3)
 	stfd	f2,CT_FPR2(r3)
@@ -64,6 +68,10 @@ save_fp:
 	blr
 
 restore_fp:	
+	/* Thread could be NULL */
+	cmpdi	r3,0
+	beqlr
+
 	lfd	f0,CT_FPSCR(r3)
 	mtfsf	0xff,f0
 
@@ -111,6 +119,10 @@ restore_fp:
  * or at all we must save/restore them all, including vrsave
  */
 save_vmx:
+	/* Thread could be NULL */
+	cmpdi	r3,0
+	beqlr
+
 	mfspr	r0,SPRN_VRSAVE
 	stw	r0,CT_VRSAVE(r3)
 
@@ -163,6 +175,10 @@ save_vmx:
 	blr
 	
 restore_vmx:
+	/* Thread could be NULL */
+	cmpdi	r3,0
+	beqlr
+
 	lwz	r0,CT_VRSAVE(r3)
 	mtspr	SPRN_VRSAVE,r0
 
@@ -211,7 +227,7 @@ restore_vmx:
 #endif /* HAS_VMX */
 
 	
-### switch_float(per_cpu_os *pcop, per_cpu_os *nextpcop)
+### switch_float(struct cpu_thread *cur_thread, struct cpu_thread *next_thread)
 C_TEXT_ENTRY(switch_float)
 	mflr	r8
 #ifdef HAS_FP
