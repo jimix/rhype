@@ -74,7 +74,7 @@ struct thread_control_area {
 };
 
 extern struct cpu_thread *preempt_thread(struct cpu_thread *, uval);
-extern void resume_thread(void) __attribute__ ((noreturn));
+extern void resume_thread(struct cpu_thread *thr) __attribute__ ((noreturn));
 extern void resume_thread_asm(struct cpu_thread *) __attribute__ ((noreturn));
 extern void enter_dormant_state(void);
 extern void exit_dormant_state(void);
@@ -156,6 +156,8 @@ sync_thread_to_tca(struct cpu_thread *thr, struct thread_control_area *tca)
 {
 	tca->vregs = thr->vregs;
 }
+#else
+#define sync_thread_to_tca(thr, tca)
 #endif /* FORCE_APPLE_MODE */
 
 
