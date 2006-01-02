@@ -162,19 +162,13 @@ arch_os_destroy(struct os *os)
 	lpidtag_release(os);
 }
 
-/* Set current thread to resume at exception vector by setting the
- * srr* and hsrr* registers.
- */
-static void
-set_to_exception(struct cpu_thread *thread, uval vector,
-		 uval curr_pc, uval curr_msr) __attribute__((unused));
 
-static void
+void
 set_to_exception(struct cpu_thread *thread, uval vector,
 		 uval curr_pc, uval curr_msr)
 {
-	(void)thread;		/* Will use if need to support non-HV HW */
-
+	DEBUG_MT(DBG_EE, "%s: LPAR[0x%x] direct\n",
+		 __func__, thread->cpu->os->po_lpid);
 	const uval srr_mask = ~(MSR_IR | MSR_DR | MSR_FE0 | MSR_PR |
 				MSR_FE1 | MSR_EE | MSR_RI);
 
@@ -183,6 +177,7 @@ set_to_exception(struct cpu_thread *thread, uval vector,
 
 	/* SRR1[33:36] & SRR1[42:47] set to 0 */
 	uval srr1 = curr_msr & ~0x00000000783f0000;
+	assert((srr1 & MSR_RI) == MSR_RI, "RI not enabled");
 
 	/* external interrupt -> hsrr0/1 */
 	uval hsrr0 = vector;
@@ -190,12 +185,24 @@ set_to_exception(struct cpu_thread *thread, uval vector,
 	uval hsrr1 = curr_msr & srr_mask;
 
 	hsrr1 = srr1_set_sf(hsrr1);
+	hsrr1 |= MSR_RI;
 
-	mtsrr0(srr0);
-	mtsrr1(srr1);
-	mthsrr0(hsrr0);
-	mthsrr1(hsrr1);
+	thread->reg_srr0 = srr0;
+	thread->reg_srr1 = srr1;
+	thread->reg_hsrr0 = hsrr0;
+	thread->reg_hsrr1 = hsrr1;
+
 }
+
+static inline void set_srr_regs(struct cpu_thread* thread)
+{
+	mtsrr0(thread->reg_srr0);
+	mtsrr1(thread->reg_srr1);
+	mthsrr0(thread->reg_hsrr0);
+	mthsrr1(thread->reg_hsrr1);
+}
+
+
 
 #ifdef HAS_MEDIATED_EE
 static void
@@ -224,6 +231,7 @@ deliver_MER(struct cpu_thread *thread, uval exc_pc, uval exc_msr)
 		assert((exc_msr & MSR_EE), "how do we get a MER w/o EE on?\n");
 
 		set_to_exception(thread, vector, exc_pc, exc_msr);
+		set_srr_regs(thread);
 	} else {
 		/* turn off LPCR[MER] since externals are no
 		 * longer present */
@@ -293,6 +301,7 @@ handle_external(struct cpu_thread *thread)
 			thread_set_MER(thread, 1);
 #else
 			set_to_exception(thread, 0x500, lpar_pc, lpar_msr);
+			set_srr_regs(thread);
 #endif
 			return 1;
 		}
@@ -397,18 +406,6 @@ switch_large_page_support(struct cpu_thread *cur, struct cpu_thread *next)
 		cur->cpu->os->large_page_selection)) {
 		restore_large_page_selection(next);
 	}
-}
-
-uval
-arch_preempt_os(struct cpu_thread *curThread, struct cpu_thread *nextThread)
-{
-	switch_slb(curThread, nextThread);
-	mtsdr1(nextThread->cpu->reg_sdr1);
-	switch_float(curThread, nextThread);
-	switch_large_page_support(curThread, nextThread);
-	tlb_switch (nextThread->cpu);
-
-	return 0;
 }
 
 void

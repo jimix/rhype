@@ -176,6 +176,12 @@ hv_map_LA(struct os *os, uval laddr, uval size)
 	return logical_to_physical_address(os, laddr, size);
 }
 
+/* Set current thread state to exception vector.
+ * Modifies "thread" only, does not set register.
+ */
+extern void set_to_exception(struct cpu_thread *thread, uval vector,
+			     uval curr_pc, uval curr_msr);
+
 extern void switch_large_page_support(struct cpu_thread *cur,
 				      struct cpu_thread *next);
 extern void restore_large_page_selection(struct cpu_thread *);
