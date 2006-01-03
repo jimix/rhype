@@ -45,6 +45,7 @@
 void
 switch_slb(struct cpu_thread *curThread, struct cpu_thread *nextThread)
 {
+
 	struct slb_cache *e = &curThread->slbcache;
 	int i;
 
@@ -63,7 +64,7 @@ switch_slb(struct cpu_thread *curThread, struct cpu_thread *nextThread)
 	/* FIXME: review all of these isyncs */
 
 	slbia();
-	inval_slb_entry(0, e);
+	slbie_0();
 
 	e = &nextThread->slbcache;
 
@@ -79,61 +80,6 @@ switch_slb(struct cpu_thread *curThread, struct cpu_thread *nextThread)
 		if (e[i].words.vsid != 0) {
 			hprintf("%s: LPAR[0x%x]: R%02d: 0x%016lx 0x%016lx\n",
 				__func__, nextThread->cpu->os->po_lpid,
-				i, vsid, esid);
-		}
-#endif
-	}
-}
-
-void
-save_slb(struct cpu_thread *thread)
-{
-#ifndef FORCE_APPLE_MODE
-	/* In apple mode we have it cached/saved already */
-	struct slb_cache *slbc = &thread->slbcache;
-	int i;
-
-	/* save all extra SLBs */
-	for (i = 0; i < SWSLB_SR_NUM; i++) {
-
-		get_slb_entry(i, slbc);
-#ifdef SLB_DEBUG
-		if (slbc->entry[i].words.vsid != 0) {
-			hprintf("%s: LPAR[0x%x]: S%02d: 0x%016lx 0x%016lx\n",
-				__func__, thread->cpu->os->po_lpid,
-				i, vsid, esid);
-		}
-#endif
-	}
-#endif
-	(void)thread;
-}
-
-void
-restore_slb(struct cpu_thread *thread)
-{
-	struct slb_cache *slbc = &thread->slbcache;
-	int i;
-
-	/* invalidate all including SLB[0], we manually have to
-	 * invalidate SLB[0] since slbia gets the rest */
-	/* FIXME: review all of these isyncs */
-
-	slbia();
-	inval_slb_entry(0, slbc);
-
-	/* restore all extra SLBs */
-	uval entries = slbc->used_map;
-	while (entries) {
-		i = bit_log2(entries);
-		entries &= ~(1ULL << i);
-
-		load_slb_entry(i, slbc);
-
-#ifdef SLB_DEBUG
-		if (slb_entry[i].words.vsid != 0) {
-			hprintf("%s: LPAR[0x%x]: R%02d: 0x%016lx 0x%016lx\n",
-				__func__, thread->cpu->os->po_lpid,
 				i, vsid, esid);
 		}
 #endif

@@ -88,6 +88,9 @@ extern sval hprintf(const char *fmt, ...)
 #define ISYNC "isync\n\t"
 #endif
 
+extern void save_slb(struct slb_cache *slbcache);
+extern void restore_slb(struct slb_cache *slbcache);
+
 static inline void
 load_slb_entry(uval index, struct slb_cache *cache)
 {
@@ -113,12 +116,12 @@ __get_slb_entry(uval index, union slb_entry *slbe)
 	/* *INDENT-OFF* */
 	__asm__ __volatile__("\n\t"
 			     ISYNC
-			     "slbmfee  %0,%2	\n\t"
-			     "slbmfev  %1,%2	\n\t"
+			     "slbmfee  %[esid],%[idx]\n\t"
+			     "slbmfev  %[vsid],%[idx]\n\t"
 			     ISYNC
-			     : "=r" (slbe->words.esid),
-			       "=r" (slbe->words.vsid)
-			     : "r" (index)
+			     : [esid] "=&r" (slbe->words.esid),
+			       [vsid] "=&r" (slbe->words.vsid)
+			     : [idx] "r" (index)
 			     : "memory");
 	/* *INDENT-ON* */
 }
@@ -142,9 +145,8 @@ inval_slb_cache_entry(uval index, struct slb_cache *cache)
 }
 
 static inline void
-__inval_slb_entry(uval index, struct slb_cache *cache)
+__inval_slb_entry(union slb_entry *entry)
 {
-	union slb_entry *entry = &cache->entries[index];
 
 	if (!entry->bits.v) return;
 
@@ -161,11 +163,19 @@ __inval_slb_entry(uval index, struct slb_cache *cache)
 			      ::[esid_c] "r" (esid_c));
 }
 
+/* Special function to foricbly invalidate SLB entry 0, which slbia misses */
+static inline void slbie_0()
+{
+	union slb_entry slbe;
+	__get_slb_entry(0, &slbe);
+	__inval_slb_entry(&slbe);
+}
+
 
 static inline void
 inval_slb_entry(uval index, struct slb_cache *cache)
 {
-	__inval_slb_entry(index, cache);
+	__inval_slb_entry(&cache->entries[index]);
 	inval_slb_cache_entry(index, cache);
 }
 
@@ -198,7 +208,7 @@ __set_slb_entry(uval index, struct slb_cache *slbc)
 static inline void
 set_slb_entry(uval index, struct slb_cache *slbc, union slb_entry *new)
 {
-	__inval_slb_entry(index, slbc);
+	__inval_slb_entry(&slbc->entries[index]);
 
 	set_slb_cache_entry(index, slbc, new);
 	load_slb_entry(index, slbc);
