@@ -25,7 +25,7 @@ CUR_TOOL=HOST
 
 top_builddir = ../..
 
-PROGRAMS=hcall hload hmsg hmeminfo hpinfo hype_run_lpar hread \
+PROGRAMS=hcall hload hmsg hmeminfo hype_run_lpar hread \
 	hype_term ofdfs vdevs hype_counters
 SH_SCRIPTS=hvcall.sh hype_dump_regs.sh
 PL_SCRIPTS=hype_prep_lpar.pl hype_status.pl hype_kill.pl \
@@ -138,7 +138,6 @@ vdevs: vdevs.o
 
 hcall: hcall.o util.o
 hmeminfo: hmeminfo.o util.o
-hpinfo: hpinfo.o util.o
 hmsg: hmsg.o util.o
 
 hload: hload.o
