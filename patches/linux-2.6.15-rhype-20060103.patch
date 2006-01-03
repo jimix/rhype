@@ -1,0 +1,1504 @@
+diff --git a/arch/powerpc/Kconfig b/arch/powerpc/Kconfig
+index db93dbc..4f7e16f 100644
+--- a/arch/powerpc/Kconfig
++++ b/arch/powerpc/Kconfig
+@@ -321,6 +321,12 @@ config PPC_MAPLE
+           This option enables support for the Maple 970FX Evaluation Board.
+ 	  For more informations, refer to <http://www.970eval.com>
+ 
++config OPENHV
++	depends on PPC_MULTIPLATFORM && PPC64
++	bool "  Open HyperVisor support"
++	help
++	  This options enables support for Open Hypervisor.
++
+ config PPC_CELL
+ 	bool "  Cell Broadband Processor Architecture"
+ 	depends on PPC_MULTIPLATFORM && PPC64
+diff --git a/arch/powerpc/boot/Makefile b/arch/powerpc/boot/Makefile
+index 9770f58..2a4490e 100644
+--- a/arch/powerpc/boot/Makefile
++++ b/arch/powerpc/boot/Makefile
+@@ -42,6 +42,10 @@ obj-boot := $(addsuffix .o, $(basename $
+ 
+ BOOTCFLAGS	+= -I$(obj) -I$(srctree)/$(obj)
+ 
++ifneq ($(CONFIG_CMDLINE),)
++$(addprefix $(obj)/,main.o): BOOTCFLAGS+= -DCONFIG_CMDLINE='$(CONFIG_CMDLINE)'
++endif
++
+ quiet_cmd_copy_zlib = COPY    $@
+       cmd_copy_zlib = sed "s@__attribute_used__@@;s@<linux/\([^>]\+\).*@\"\1\"@" $< > $@
+ 
+@@ -147,3 +151,4 @@ install: $(CONFIGURE) $(BOOTIMAGE)
+ 	sh -x $(srctree)/$(src)/install.sh "$(KERNELRELEASE)" vmlinux System.map "$(INSTALL_PATH)" "$(BOOTIMAGE)"
+ 
+ clean-files := $(addprefix $(objtree)/, $(obj-boot) vmlinux.strip)
++
+diff --git a/arch/powerpc/boot/main.c b/arch/powerpc/boot/main.c
+index 64ec931..0cdb7a3 100644
+--- a/arch/powerpc/boot/main.c
++++ b/arch/powerpc/boot/main.c
+@@ -33,6 +33,12 @@ extern char _vmlinux_end[];
+ extern char _initrd_start[];
+ extern char _initrd_end[];
+ 
++#ifdef CONFIG_CMDLINE
++#define COMMAND_LINE_SIZE 512
++const char builtin_cmdline[COMMAND_LINE_SIZE]
++	__attribute__((section("__builtin_cmdline"))) = CONFIG_CMDLINE;
++#endif
++
+ struct addr_range {
+ 	unsigned long addr;
+ 	unsigned long size;
+@@ -193,6 +199,19 @@ static int is_elf32(void *hdr)
+ 	return 1;
+ }
+ 
++void check_cmdline(void* chosen_handle)
++{
++#ifdef CONFIG_CMDLINE
++	int len;
++	char cmdline[COMMAND_LINE_SIZE];
++	len = getprop(chosen_handle, "bootargs", cmdline, sizeof(cmdline));
++	if (len <= 0 || cmdline[0] == 0) {
++		setprop(chosen_handle, "bootargs", builtin_cmdline, 
++			strlen(builtin_cmdline));
++	}
++#endif /* CONFIG_CMDLINE */
++}
++
+ void start(unsigned long a1, unsigned long a2, void *promptr, void *sp)
+ {
+ 	int len;
+@@ -210,6 +229,8 @@ void start(unsigned long a1, unsigned lo
+ 	if (getprop(chosen_handle, "stdin", &stdin, sizeof(stdin)) != 4)
+ 		exit();
+ 
++	check_cmdline(chosen_handle);
++	
+ 	printf("\n\rzImage starting: loaded at 0x%p (sp: 0x%p)\n\r", _start, sp);
+ 
+ 	vmlinuz.addr = (unsigned long)_vmlinux_start;
+diff --git a/arch/powerpc/boot/prom.c b/arch/powerpc/boot/prom.c
+index 4bea2f4..b822639 100644
+--- a/arch/powerpc/boot/prom.c
++++ b/arch/powerpc/boot/prom.c
+@@ -163,6 +163,32 @@ getprop(void *phandle, const char *name,
+ }
+ 
+ int
++setprop(void *phandle, const char *name, void *buf, int buflen)
++{
++    struct prom_args {
++	char *service;
++	int nargs;
++	int nret;
++	void *phandle;
++	const char *name;
++	void *buf;
++	int buflen;
++	int size;
++    } args;
++	
++    args.service = "setprop";
++    args.nargs = 4;
++    args.nret = 1;
++    args.phandle = phandle;
++    args.name = name;
++    args.buf = buf;
++    args.buflen = buflen;
++    args.size = -1;
++    (*prom)(&args);
++    return args.size;
++}
++
++int
+ putc(int c, void *f)
+ {
+ 	char ch = c;
+diff --git a/arch/powerpc/boot/prom.h b/arch/powerpc/boot/prom.h
+index 96ab5ae..0ca5d88 100644
+--- a/arch/powerpc/boot/prom.h
++++ b/arch/powerpc/boot/prom.h
+@@ -15,4 +15,5 @@ extern void pause(void);
+ extern void *finddevice(const char *);
+ extern void *claim(unsigned long virt, unsigned long size, unsigned long align);
+ extern int getprop(void *phandle, const char *name, void *buf, int buflen);
++extern int setprop(void *phandle, const char *name, void *buf, int buflen);
+ #endif				/* _PPC_BOOT_PROM_H_ */
+diff --git a/arch/powerpc/kernel/cpu_setup_power4.S b/arch/powerpc/kernel/cpu_setup_power4.S
+index cca942f..01b258d 100644
+--- a/arch/powerpc/kernel/cpu_setup_power4.S
++++ b/arch/powerpc/kernel/cpu_setup_power4.S
+@@ -91,6 +91,13 @@ _GLOBAL(__setup_cpu_be)
+ 	blr
+ 
+ _GLOBAL(__setup_cpu_ppc970)
++	/*
++	 * Do nothing if not running in HV mode
++	 */
++	mfmsr	r0
++	rldicl.	r0,r0,4,63
++	beqlr
++
+ 	mfspr	r0,SPRN_HID0
+ 	li	r11,5			/* clear DOZE and SLEEP */
+ 	rldimi	r0,r11,52,8		/* set NAP and DPM */
+diff --git a/arch/powerpc/kernel/irq.c b/arch/powerpc/kernel/irq.c
+index 5a71ed9..519f1e3 100644
+--- a/arch/powerpc/kernel/irq.c
++++ b/arch/powerpc/kernel/irq.c
+@@ -330,10 +330,14 @@ unsigned int virt_irq_to_real_map[NR_IRQ
+  * offset them by 16 (to reserve the first 16 for ISA interrupts)
+  * we don't end up with an interrupt number >= NR_IRQS.
+  */
+-#define MIN_VIRT_IRQ	3
++
++/* Upper limit on irqs which are mapped 1-1 virt-to-real */
++unsigned int ppc_unmapped_irqs = NR_IRQS;
++#define MIN_VIRT_IRQ	ppc_unmapped_irqs
+ #define MAX_VIRT_IRQ	(NR_IRQS - NUM_ISA_INTERRUPTS - 1)
+ #define NR_VIRT_IRQS	(MAX_VIRT_IRQ - MIN_VIRT_IRQ + 1)
+ 
++
+ void
+ virt_irq_init(void)
+ {
+@@ -348,13 +352,7 @@ virt_irq_init(void)
+ int virt_irq_create_mapping(unsigned int real_irq)
+ {
+ 	unsigned int virq, first_virq;
+-	static int warned;
+-
+-	if (ppc64_interrupt_controller == IC_OPEN_PIC)
+-		return real_irq;	/* no mapping for openpic (for now) */
+-
+-	if (ppc64_interrupt_controller == IC_CELL_PIC)
+-		return real_irq;	/* no mapping for iic either */
++	static int warned = 0;
+ 
+ 	/* don't map interrupts < MIN_VIRT_IRQ */
+ 	if (real_irq < MIN_VIRT_IRQ) {
+diff --git a/arch/powerpc/kernel/prom.c b/arch/powerpc/kernel/prom.c
+index 3bf968e..6098dec 100644
+--- a/arch/powerpc/kernel/prom.c
++++ b/arch/powerpc/kernel/prom.c
+@@ -80,6 +80,11 @@ int __initdata iommu_force_on;
+ unsigned long tce_alloc_start, tce_alloc_end;
+ #endif
+ 
++#ifdef CONFIG_CMDLINE
++const char builtin_cmdline[COMMAND_LINE_SIZE]
++	__attribute__((section("__builtin_cmdline"))) = CONFIG_CMDLINE;
++#endif
++
+ typedef u32 cell_t;
+ 
+ #if 0
+@@ -1068,7 +1073,7 @@ void __init unflatten_device_tree(void)
+ 	}
+ #ifdef CONFIG_CMDLINE
+ 	if (l == 0 || (l == 1 && (*p) == 0))
+-		strlcpy(cmd_line, CONFIG_CMDLINE, COMMAND_LINE_SIZE);
++		strlcpy(cmd_line, builtin_cmdline, COMMAND_LINE_SIZE);
+ #endif /* CONFIG_CMDLINE */
+ 
+ 	DBG("Command line is: %s\n", cmd_line);
+diff --git a/arch/powerpc/kernel/prom_init.c b/arch/powerpc/kernel/prom_init.c
+index bcdc209..d8589f8 100644
+--- a/arch/powerpc/kernel/prom_init.c
++++ b/arch/powerpc/kernel/prom_init.c
+@@ -184,6 +184,10 @@ static int __initdata of_platform;
+ 
+ static char __initdata prom_cmd_line[COMMAND_LINE_SIZE];
+ 
++#ifdef CONFIG_CMDLINE
++extern const char builtin_cmdline[COMMAND_LINE_SIZE];
++#endif
++
+ static unsigned long __initdata prom_memory_limit;
+ 
+ static unsigned long __initdata alloc_top;
+@@ -563,7 +567,7 @@ static void __init early_cmdline_parse(v
+ #ifdef CONFIG_CMDLINE
+ 	if (l == 0) /* dbl check */
+ 		strlcpy(RELOC(prom_cmd_line),
+-			RELOC(CONFIG_CMDLINE), sizeof(prom_cmd_line));
++			RELOC(builtin_cmdline), sizeof(prom_cmd_line));
+ #endif /* CONFIG_CMDLINE */
+ 	prom_printf("command line: %s\n", RELOC(prom_cmd_line));
+ 
+@@ -1482,8 +1486,20 @@ static int __init prom_find_machine_type
+ 	struct prom_t *_prom = &RELOC(prom);
+ 	char compat[256];
+ 	int len, i = 0;
++	int lpar = 0;
++	
+ #ifdef CONFIG_PPC64
+ 	phandle rtas;
++	/* Default to pSeries. We need to know if we are running LPAR */
++	rtas = call_prom("finddevice", 1, 1, ADDR("/rtas"));
++	if (PHANDLE_VALID(rtas)) {
++		int x = prom_getproplen(rtas, "ibm,hypertas-functions");
++		if (x != PROM_ERROR) {
++			prom_printf("Hypertas detected, assuming LPAR !\n");
++			lpar = PLATFORM_LPAR;
++		}
++	}
++
+ #endif
+ 	len = prom_getprop(_prom->root, "compatible",
+ 			   compat, sizeof(compat)-1);
+@@ -1496,25 +1512,17 @@ static int __init prom_find_machine_type
+ 				break;
+ 			if (strstr(p, RELOC("Power Macintosh")) ||
+ 			    strstr(p, RELOC("MacRISC")))
+-				return PLATFORM_POWERMAC;
++				return PLATFORM_POWERMAC | lpar;
+ #ifdef CONFIG_PPC64
+ 			if (strstr(p, RELOC("Momentum,Maple")))
+-				return PLATFORM_MAPLE;
++				return PLATFORM_MAPLE | lpar;
+ #endif
+ 			i += sl + 1;
+ 		}
+ 	}
++
+ #ifdef CONFIG_PPC64
+-	/* Default to pSeries. We need to know if we are running LPAR */
+-	rtas = call_prom("finddevice", 1, 1, ADDR("/rtas"));
+-	if (PHANDLE_VALID(rtas)) {
+-		int x = prom_getproplen(rtas, "ibm,hypertas-functions");
+-		if (x != PROM_ERROR) {
+-			prom_printf("Hypertas detected, assuming LPAR !\n");
+-			return PLATFORM_PSERIES_LPAR;
+-		}
+-	}
+-	return PLATFORM_PSERIES;
++	return PLATFORM_PSERIES | lpar;
+ #else
+ 	return PLATFORM_CHRP;
+ #endif
+diff --git a/arch/powerpc/kernel/rtas-proc.c b/arch/powerpc/kernel/rtas-proc.c
+index 7a95b8a..ce005b8 100644
+--- a/arch/powerpc/kernel/rtas-proc.c
++++ b/arch/powerpc/kernel/rtas-proc.c
+@@ -258,7 +258,8 @@ static int __init proc_rtas_init(void)
+ {
+ 	struct proc_dir_entry *entry;
+ 
+-	if (_machine != PLATFORM_PSERIES && _machine != PLATFORM_PSERIES_LPAR)
++	if (_machine != PLATFORM_PSERIES && _machine != PLATFORM_PSERIES_LPAR
++	    && _machine != PLATFORM_MAPLE_LPAR)
+ 		return 1;
+ 
+ 	rtas_node = of_find_node_by_name(NULL, "rtas");
+diff --git a/arch/powerpc/kernel/rtas.c b/arch/powerpc/kernel/rtas.c
+index 4283fa3..0684c15 100644
+--- a/arch/powerpc/kernel/rtas.c
++++ b/arch/powerpc/kernel/rtas.c
+@@ -668,7 +668,8 @@ void __init rtas_initialize(void)
+ 	 * the stop-self token if any
+ 	 */
+ #ifdef CONFIG_PPC64
+-	if (_machine == PLATFORM_PSERIES_LPAR)
++	if (_machine == PLATFORM_PSERIES_LPAR || 
++	    _machine == PLATFORM_MAPLE_LPAR)
+ 		rtas_region = min(lmb.rmo_size, RTAS_INSTANTIATE_MAX);
+ #endif
+ 	rtas_rmo_buf = lmb_alloc_base(RTAS_RMOBUF_MAX, PAGE_SIZE, rtas_region);
+diff --git a/arch/powerpc/kernel/setup-common.c b/arch/powerpc/kernel/setup-common.c
+index bd3eb42..2f965a6 100644
+--- a/arch/powerpc/kernel/setup-common.c
++++ b/arch/powerpc/kernel/setup-common.c
+@@ -520,7 +520,8 @@ void __init smp_setup_cpu_maps(void)
+ 	 * On pSeries LPAR, we need to know how many cpus
+ 	 * could possibly be added to this partition.
+ 	 */
+-	if (_machine == PLATFORM_PSERIES_LPAR &&
++	if ((_machine == PLATFORM_PSERIES_LPAR || 
++	     _machine == PLATFORM_MAPLE_LPAR) &&
+ 	    (dn = of_find_node_by_path("/rtas"))) {
+ 		int num_addr_cell, num_size_cell, maxcpus;
+ 		unsigned int *ireg;
+diff --git a/arch/powerpc/kernel/traps.c b/arch/powerpc/kernel/traps.c
+index 1511454..1bd159d 100644
+--- a/arch/powerpc/kernel/traps.c
++++ b/arch/powerpc/kernel/traps.c
+@@ -145,6 +145,14 @@ int die(const char *str, struct pt_regs 
+ 		printk("POWERMAC ");
+ 		nl = 1;
+ 		break;
++	case PLATFORM_MAPLE_LPAR:
++		printk("MAPLE_LPAR ");
++		nl = 1;
++		break;
++	case PLATFORM_MAPLE:
++		printk("MAPLE ");
++		nl = 1;
++		break;
+ 	case PLATFORM_CELL:
+ 		printk("CELL ");
+ 		nl = 1;
+diff --git a/arch/powerpc/platforms/maple/setup.c b/arch/powerpc/platforms/maple/setup.c
+index 7ece898..e2ff496 100644
+--- a/arch/powerpc/platforms/maple/setup.c
++++ b/arch/powerpc/platforms/maple/setup.c
+@@ -70,6 +70,7 @@
+ #define DBG(fmt...)
+ #endif
+ 
++extern int find_udbg_vterm(void);
+ extern void generic_find_legacy_serial_ports(u64 *physport,
+ 		unsigned int *default_speed);
+ 
+@@ -189,14 +190,20 @@ static void __init maple_init_early(void
+ 	/* Initialize hash table, from now on, we can take hash faults
+ 	 * and call ioremap
+ 	 */
+-	hpte_init_native();
++	if (platform_is_lpar()) {
++		hpte_init_lpar();
++	} else {
++		hpte_init_native();
++	}
+ 
+ 	/* Find the serial port */
+ 	generic_find_legacy_serial_ports(&physport, &default_speed);
+ 
+ 	DBG("phys port addr: %lx\n", (long)physport);
+ 
+-	if (physport) {
++	if (platform_is_lpar()) 
++		find_udbg_vterm();
++	else if (physport) {
+ 		void *comport;
+ 		/* Map the uart for udbg. */
+ 		comport = (void *)ioremap(physport, 16);
+@@ -208,18 +215,26 @@ static void __init maple_init_early(void
+ 	/* Setup interrupt mapping options */
+ 	ppc64_interrupt_controller = IC_OPEN_PIC;
+ 
+-	iommu_init_early_u3();
+-
++	if (platform_is_lpar()) {
++		iommu_init_early_pSeries();
++	} else {
++		iommu_init_early_u3();
++	}
++	
+ 	DBG(" <- maple_init_early\n");
+ }
+ 
+ 
++int hvic_get_irq(struct pt_regs *regs);
++
+ static __init void maple_init_IRQ(void)
+ {
+ 	struct device_node *root;
+ 	unsigned int *opprop;
+ 	unsigned long opic_addr;
+ 	struct mpic *mpic;
++	unsigned int mpic_flags = MPIC_PRIMARY | MPIC_BIG_ENDIAN |
++				MPIC_BROKEN_U3 | MPIC_WANTS_RESET;
+ 	unsigned char senses[128];
+ 	int n;
+ 
+@@ -241,9 +256,11 @@ static __init void maple_init_IRQ(void)
+ 	/* Obtain sense values from device-tree */
+ 	prom_get_irq_senses(senses, 0, 128);
+ 
+-	mpic = mpic_alloc(opic_addr,
+-			  MPIC_PRIMARY | MPIC_BIG_ENDIAN |
+-			  MPIC_BROKEN_U3 | MPIC_WANTS_RESET,
++	if (platform_is_lpar()) {
++		ppc_md.get_irq = hvic_get_irq;
++	}
++
++	mpic = mpic_alloc(opic_addr, mpic_flags,
+ 			  0, 0, 128, 128, senses, 128, "U3-MPIC");
+ 	BUG_ON(mpic == NULL);
+ 	mpic_init(mpic);
+@@ -262,7 +279,8 @@ static void __init maple_progress(char *
+  */
+ static int __init maple_probe(int platform)
+ {
+-	if (platform != PLATFORM_MAPLE)
++	if (platform != PLATFORM_MAPLE &&
++	    platform != PLATFORM_MAPLE_LPAR)
+ 		return 0;
+ 	/*
+ 	 * On U3, the DART (iommu) must be allocated now since it
+@@ -270,7 +288,9 @@ static int __init maple_probe(int platfo
+ 	 * occupies having to be broken up so the DART itself is not
+ 	 * part of the cacheable linar mapping
+ 	 */
+-	alloc_u3_dart_table();
++	if (!platform_is_lpar()) {
++		alloc_u3_dart_table();
++	}
+ 
+ 	return 1;
+ }
+diff --git a/arch/powerpc/platforms/pseries/hvCall.S b/arch/powerpc/platforms/pseries/hvCall.S
+index 176e8da..87b2e39 100644
+--- a/arch/powerpc/platforms/pseries/hvCall.S
++++ b/arch/powerpc/platforms/pseries/hvCall.S
+@@ -129,3 +129,48 @@ _GLOBAL(plpar_hcall_4out)
+ 
+ 	mtcrf	0xff,r0
+ 	blr				/* return r3 = status */
++
++/* long plpar_hcall_generic(unsigned long opcode,	R3
++			    unsigned long in_args[8],	R4
++			    unsigned long out_args[8])	R5
++*/
++_GLOBAL(plpar_hcall_generic)
++	mfcr	r0
++	std	r0,-8(r1)
++	stdu	r1,-48(r1)
++
++	std	r4,16(r1)
++	std	r5,8(r1)
++
++	mr	r12, r4
++	ld	r4, 0(r12)
++	ld	r5, 8(r12)
++	ld	r6, 16(r12)
++	ld	r7, 24(r12)
++	ld	r8, 32(r12)
++	ld	r9, 40(r12)
++	ld	r10, 48(r12)
++	ld	r11, 56(r12)
++
++	HVSC
++
++	ld	r12, 8(r1)
++	cmpi	0, r12, 0
++	beq	1f
++
++	std	r4, 0(r12)
++	std	r5, 8(r12)
++	std	r6, 16(r12)
++	std	r7, 24(r12)
++	std	r8, 32(r12)
++	std	r9, 40(r12)
++	std	r10, 48(r12)
++	std	r11, 56(r12)
++1:
++	ld	r1,0(r1) 
++	ld	r0,-8(r1)
++
++	mtcrf	0xff,r0
++	blr				/* return r3 = status */
++
++
+diff --git a/arch/powerpc/platforms/pseries/vio.c b/arch/powerpc/platforms/pseries/vio.c
+index 866379b..7399d34 100644
+--- a/arch/powerpc/platforms/pseries/vio.c
++++ b/arch/powerpc/platforms/pseries/vio.c
+@@ -17,6 +17,7 @@
+ #include <linux/module.h>
+ #include <linux/mm.h>
+ #include <linux/kobject.h>
++#include <linux/openhv.h>
+ #include <asm/iommu.h>
+ #include <asm/dma.h>
+ #include <asm/prom.h>
+@@ -178,7 +179,13 @@ struct vio_dev * __devinit vio_register_
+ 	viodev->irq = NO_IRQ;
+ 	irq_p = (unsigned int *)get_property(of_node, "interrupts", NULL);
+ 	if (irq_p) {
+-		int virq = virt_irq_create_mapping(*irq_p);
++		int virq;
++		if (platform_is_pseries()) {
++			virq = virt_irq_create_mapping(*irq_p);
++		} else {
++			virq = map_hv_irq(*irq_p);
++		}
++		
+ 		if (virq == NO_IRQ) {
+ 			printk(KERN_ERR "Unable to allocate interrupt "
+ 			       "number for %s\n", of_node->full_name);
+diff --git a/arch/powerpc/platforms/pseries/xics.c b/arch/powerpc/platforms/pseries/xics.c
+index 0377dec..da283dc 100644
+--- a/arch/powerpc/platforms/pseries/xics.c
++++ b/arch/powerpc/platforms/pseries/xics.c
+@@ -456,6 +456,9 @@ void xics_init_IRQ(void)
+ 
+ 	ppc64_boot_msg(0x20, "XICS Init");
+ 
++	/* We re-map all physical irqs except for 0,1,2 into 3..NR_IRQ. */
++	ppc_unmapped_irqs = 3;
++
+ 	ibm_get_xive = rtas_token("ibm,get-xive");
+ 	ibm_set_xive = rtas_token("ibm,set-xive");
+ 	ibm_int_on  = rtas_token("ibm,int-on");
+diff --git a/arch/powerpc/sysdev/Makefile b/arch/powerpc/sysdev/Makefile
+index 6b7efcf..0d3ad81 100644
+--- a/arch/powerpc/sysdev/Makefile
++++ b/arch/powerpc/sysdev/Makefile
+@@ -6,3 +6,4 @@ obj-$(CONFIG_BOOKE)		+= dcr.o
+ obj-$(CONFIG_40x)		+= dcr.o
+ obj-$(CONFIG_U3_DART)		+= u3_iommu.o
+ obj-$(CONFIG_MMIO_NVRAM)	+= mmio_nvram.o
++obj-$(CONFIG_OPENHV)		+= hvic.o
+diff --git a/arch/powerpc/sysdev/hvic.c b/arch/powerpc/sysdev/hvic.c
+new file mode 100644
+index 0000000..e6328f5
+--- /dev/null
++++ b/arch/powerpc/sysdev/hvic.c
+@@ -0,0 +1,211 @@
++/* 
++ * arch/ppc64/kernel/openhype.c
++ *
++ * Copyright 2005 IBM Corporation.
++ *
++ *  This program is free software; you can redistribute it and/or
++ *  modify it under the terms of the GNU General Public License
++ *  as published by the Free Software Foundation; either version
++ *  2 of the License, or (at your option) any later version.
++ */
++#include <linux/config.h>
++#include <linux/types.h>
++#include <linux/threads.h>
++#include <linux/kernel.h>
++#include <linux/irq.h>
++#include <linux/smp.h>
++#include <linux/interrupt.h>
++#include <linux/signal.h>
++#include <linux/init.h>
++#include <linux/gfp.h>
++#include <linux/radix-tree.h>
++#include <asm/prom.h>
++#include <asm/io.h>
++#include <asm/pgtable.h>
++#include <asm/smp.h>
++#include <asm/rtas.h>
++#include <asm/hvcall.h>
++#include <asm/machdep.h>
++
++static void hvic_enable_irq(unsigned int irq);
++static void hvic_disable_irq(unsigned int irq);
++static void hvic_shutdown_irq(unsigned int irq);
++extern void hvic_end_irq(unsigned int irq);
++
++struct hw_interrupt_type hvic = {
++	.typename = "Hypervisor",
++	.enable = hvic_enable_irq,
++	.disable = hvic_disable_irq,
++	.shutdown = hvic_shutdown_irq,
++	.end = hvic_end_irq,
++};
++
++
++static inline long plpar_eoi(unsigned long xirr)
++{
++	return plpar_hcall_norets(H_EOI, xirr);
++}
++
++static inline long plpar_cppr(unsigned long cppr)
++{
++	return plpar_hcall_norets(H_CPPR, cppr);
++}
++
++static inline long plpar_ipi(unsigned long servernum, unsigned long mfrr)
++{
++	return plpar_hcall_norets(H_IPI, servernum, mfrr);
++}
++
++static inline long plpar_xirr(unsigned long *xirr_ret)
++{
++	unsigned long dummy;
++	return plpar_hcall(H_XIRR, 0, 0, 0, 0, xirr_ret, &dummy, &dummy);
++}
++
++static int call_xirr(void)
++{
++	unsigned long lpar_rc;
++	unsigned long return_value; 
++
++	lpar_rc = plpar_xirr(&return_value);
++	if (lpar_rc != H_Success)
++		panic(" bad return code xirr - rc = %lx \n", lpar_rc); 
++	return (int)return_value;
++}
++
++static void call_eoi(int value)
++{
++	unsigned long lpar_rc;
++	unsigned long val64 = value & 0xffffffff;
++
++	lpar_rc = plpar_eoi(val64);
++	if (lpar_rc != H_Success)
++		panic("bad return code EOI - rc = %ld, value=%lx\n", lpar_rc,
++		      val64); 
++}
++
++static void call_vio_signal(unsigned long irq, int value)
++{
++	unsigned long lpar_rc;
++	unsigned long val64 = value & 0xffffffff;
++
++	lpar_rc = plpar_hcall_norets(H_VIO_SIGNAL, irq, val64);
++	if (lpar_rc != H_Success)
++		panic("bad return code VIO_SIGNAL - rc = %ld, value=%lx\n", 
++		      lpar_rc, val64); 
++}
++
++/* This is used to map real irq numbers to virtual */
++static struct radix_tree_root irq_map = RADIX_TREE_INIT(GFP_KERNEL);
++
++static unsigned int real_irq_to_virt(unsigned int real_irq)
++{
++	unsigned int *ptr;
++
++	ptr = radix_tree_lookup(&irq_map, real_irq);
++	if (ptr == NULL)
++		return NO_IRQ;
++	return ptr - virt_irq_to_real_map;
++}
++
++static void hvic_enable_irq(unsigned int virq)
++{
++	call_vio_signal(virt_irq_to_real(virq), 1);
++}
++
++static void hvic_disable_irq(unsigned int virq)
++{
++	call_vio_signal(virt_irq_to_real(virq), 0);
++}
++
++#define UNDEFINED_IRQ 0xffffffff
++
++void hvic_end_irq(unsigned int irq)
++{
++	int virq = virt_irq_to_real(irq);
++	
++	if(virq == UNDEFINED_IRQ) {
++		virq = irq;
++	}
++	
++	call_eoi(virq);
++}
++
++static spinlock_t hv_irq_lock = SPIN_LOCK_UNLOCKED;
++
++
++extern unsigned int real_irq_to_virt_slowpath(unsigned int real_irq);
++
++int hvic_get_irq(struct pt_regs *regs)
++{
++	unsigned int vec;
++	int irq;
++
++	vec = call_xirr();
++
++//	printk("%s %x\n", __func__, vec);
++	
++	/*  (vec >> 24) == old priority */
++	vec &= 0x00ffffff;
++	if(vec == 0 || vec == 255) {
++		return -1;
++	}
++
++	if((vec & 0x00f00000) == 0){
++		return vec;
++	}
++
++	irq = real_irq_to_virt(vec);
++	if (irq == NO_IRQ)
++		irq = real_irq_to_virt_slowpath(vec);
++	if (irq == NO_IRQ) {
++		printk(KERN_ERR "Interrupt 0x%x (real) is invalid\n", vec);
++	}
++	return irq;
++}
++
++int map_hv_irq(unsigned int vector)
++{
++	unsigned long flags;
++	int x;
++	
++	/* Only virt irq sources should be coming through here */
++	if ((vector & (0xf<<20)) == 0) {
++		return NO_IRQ;
++	}
++	spin_lock_irqsave(&hv_irq_lock, flags);
++	
++	x = virt_irq_create_mapping(vector); /* Will call oh_use_virq... */
++	get_irq_desc(x)->handler = &hvic;
++
++	if (radix_tree_insert(&irq_map, virt_irq_to_real(x),
++			      &virt_irq_to_real_map[x]) == -ENOMEM)
++		printk(KERN_CRIT "Out of memory creating real -> virtual"
++		       " IRQ mapping for irq %u (real 0x%x)\n",
++		       vector, virt_irq_to_real(vector));
++
++	spin_unlock_irqrestore(&hv_irq_lock, flags);
++	return x;
++}
++
++
++int unmap_hv_irq(unsigned int irq)
++{
++	unsigned long flags;
++	int ret = -1;
++
++	spin_lock_irqsave(&hv_irq_lock, flags);
++	if(irq != NO_IRQ) {
++		virt_irq_to_real_map[irq] = NO_IRQ;
++		radix_tree_delete(&irq_map, irq);
++		ret = 0;
++	}
++	spin_unlock_irqrestore(&hv_irq_lock, flags);
++	return ret;
++}
++
++static void hvic_shutdown_irq(unsigned int virq)
++{
++	call_vio_signal(virt_irq_to_real(virq), 0);
++	unmap_hv_irq(virq);
++}
+diff --git a/arch/powerpc/sysdev/mpic.c b/arch/powerpc/sysdev/mpic.c
+index 58d1cc2..8617d6f 100644
+--- a/arch/powerpc/sysdev/mpic.c
++++ b/arch/powerpc/sysdev/mpic.c
+@@ -48,6 +48,8 @@ static DEFINE_SPINLOCK(mpic_lock);
+ #define distribute_irqs	CONFIG_IRQ_ALL_CPUS
+ #endif
+ 
++#define MAX(a,b) (a > b ? a : b)
++
+ /*
+  * Register accessor functions
+  */
+@@ -713,6 +715,11 @@ void __init mpic_init(struct mpic *mpic)
+ 			irq_desc[mpic->irq_offset+i].handler = &mpic->hc_irq;
+ 		}
+ 	}
++
++	/* This will avoid re-mapping interrupts. */
++	if (mpic->flags & MPIC_PRIMARY) {
++	    ppc_unmapped_irqs = mpic->ipi_offset + 4; 
++	}
+ 	
+ 	/* Init spurrious vector */
+ 	mpic_write(mpic->gregs, MPIC_GREG_SPURIOUS, MPIC_VEC_SPURRIOUS);
+diff --git a/drivers/Makefile b/drivers/Makefile
+index ea410b6..3a9abff 100644
+--- a/drivers/Makefile
++++ b/drivers/Makefile
+@@ -66,6 +66,7 @@ obj-$(CONFIG_EISA)		+= eisa/
+ obj-$(CONFIG_CPU_FREQ)		+= cpufreq/
+ obj-$(CONFIG_MMC)		+= mmc/
+ obj-$(CONFIG_INFINIBAND)	+= infiniband/
++obj-$(CONFIG_OPENHV)		+= openhv/
+ obj-$(CONFIG_SGI_IOC4)		+= sn/
+ obj-y				+= firmware/
+ obj-$(CONFIG_CRYPTO)		+= crypto/
+diff --git a/drivers/openhv/Makefile b/drivers/openhv/Makefile
+new file mode 100644
+index 0000000..61c83da
+--- /dev/null
++++ b/drivers/openhv/Makefile
+@@ -0,0 +1,4 @@
++# Makefile for hypervisor drivers
++
++obj-y	+= hcall.o irq_reflect.o mem_hold.o
++
+diff --git a/drivers/openhv/hcall.c b/drivers/openhv/hcall.c
+new file mode 100644
+index 0000000..3f0601a
+--- /dev/null
++++ b/drivers/openhv/hcall.c
+@@ -0,0 +1,191 @@
++/* /dev/hcall: device for userspace access to hypervisor, and memory.
++ *
++ * Copyright (C) 2004, Rusty Russell IBM Corporation.
++ * Copyright (C) 2005, Michal Ostrowski IBM Corporation.
++ *
++ *  This program is free software; you can redistribute it and/or
++ *  modify it under the terms of the GNU General Public License
++ *  as published by the Free Software Foundation; either version
++ *  2 of the License, or (at your option) any later version.
++ */
++#include <linux/list.h>
++#include <linux/slab.h>
++#include <linux/fs.h>
++#include <linux/sched.h>
++#include <linux/mm.h>
++#include <linux/init.h>
++#include <linux/ioctl32.h>
++#include <linux/devfs_fs_kernel.h>
++#include <linux/openhv.h>
++#include <linux/module.h>
++#include <linux/device.h>
++
++#include <asm/semaphore.h>
++#include <asm/errno.h>
++#include <asm/hvcall.h>
++#include <asm/uaccess.h>
++#include <asm/io.h>
++#include <asm/setup.h>
++
++#include "openhv_internal.h"
++
++static LIST_HEAD(shared);
++static DECLARE_MUTEX(hcall_lock);
++
++static int do_generic_hcall(void __user* arg)
++{
++	oh_hcall_args ha;
++	int ret;
++
++	if (copy_from_user(&ha, arg, sizeof(ha)) != 0)
++		return -EFAULT;
++
++	/* This may not be necessary. */
++	down(&hcall_lock);
++
++	ret = oh_generic_hcall(&ha);
++
++	up(&hcall_lock);
++
++	if(ret < 0) return ret;
++
++	if (copy_to_user(arg, &ha, sizeof(ha)) != 0)
++		return -EFAULT;
++
++	return ret;
++}
++
++
++
++static int hcall_ioctl(struct inode *inode, struct file *file,
++		       unsigned int cmd, unsigned long arg)
++{
++	if (!capable(CAP_SYS_ADMIN))
++		return -EPERM;
++
++	switch(cmd) {
++	case OH_GENHCALL:
++		return do_generic_hcall((void __user*)arg);
++	case OH_IRQ_REFLECT:
++		return do_config_reflect(file, (void __user*)arg);
++	case OH_MEM_HOLD:
++		return do_config_mem_hold(file, (void __user*)arg);
++	}
++
++	return -ENOTTY;
++}
++
++static int hcall_ioctl_compat(struct inode *inode, struct file *file,
++			      unsigned int cmd, unsigned long arg)
++{
++	if (!capable(CAP_SYS_ADMIN))
++		return -EPERM;
++
++	switch(cmd) {
++	case OH_GENHCALL:
++		return do_generic_hcall((void __user*)arg);
++	case OH_IRQ_REFLECT:
++		return do_config_reflect(file, (void __user*)arg);
++	case OH_MEM_HOLD:
++		return do_config_mem_hold(file, (void __user*)arg);
++	}
++
++	return -ENOTTY;
++}
++
++/* We can map any shared region, or any logical memory Linux doesn't
++ * know about. */
++static int hcall_mmap(struct file *file, struct vm_area_struct *vma)
++{
++	int err;
++
++	if (!capable(CAP_SYS_ADMIN))
++		return -EPERM;
++
++	if (down_interruptible(&hcall_lock) != 0)
++		return -EINTR;
++
++	err = -EINVAL;
++	/* This isn't actually right for all archs: works for x86 and
++	 * ppc though.  This prevents us mapping kernel memory. */
++
++	/* Second, check memory holds for memory that is within the
++	 * kernel that has been held aside for this purpose (OH_MEM_HOLD). */
++	if (pfn_valid(vma->vm_pgoff)) {
++		if(check_hold_mem(file, vma->vm_pgoff << PAGE_SHIFT,
++				  vma->vm_end - vma->vm_start)) {
++			/* Don't try to swap out physical pages.. */
++			vma->vm_flags |= VM_RESERVED;
++		} else {
++			goto unlock;
++		}
++	}
++
++	err = remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff,
++			      vma->vm_end - vma->vm_start,
++			      vma->vm_page_prot);
++unlock:
++	up(&hcall_lock);
++	return err;
++}
++
++static int hcall_open(struct inode *i, struct file *f)
++{
++	struct hcall_file_priv* hfp = kmalloc(sizeof(struct hcall_file_priv),
++					     GFP_KERNEL);
++	
++	spin_lock_init(&hfp->hfp_lock);
++	INIT_LIST_HEAD(&hfp->hfp_reflist);
++	INIT_LIST_HEAD(&hfp->hfp_holdlist);
++
++	f->private_data = hfp;
++	return 0;
++}
++
++static int hcall_release(struct inode *i, struct file *f)
++{
++
++	irq_reflect_release(i, f);
++	mem_hold_release(i, f);
++
++	kfree(f->private_data);
++	f->private_data = NULL;
++	return 0;
++}
++
++
++
++static struct file_operations hcall_fops = {
++	.open		= hcall_open,
++	.ioctl		= hcall_ioctl,
++	.ioctl		= hcall_ioctl_compat,
++	.mmap		= hcall_mmap,
++	.release	= hcall_release,
++};
++
++static int major;
++static struct class *oh_class;
++
++static int init(void)
++{
++	major = register_chrdev(0, "hcall", &hcall_fops);
++
++	oh_class = class_create(THIS_MODULE, "openhype");
++
++	if(major >= 0) {
++	    class_device_create(oh_class, NULL, MKDEV(major, 0), 
++				NULL, "hcall");
++		devfs_mk_cdev(MKDEV(major, 0), 
++			      S_IFCHR|S_IRUGO|S_IWUGO, "hcall");
++	}
++	return major < 0 ? major : 0;
++}
++
++static void fini(void)
++{
++	unregister_chrdev(major, "hcall");
++}
++
++module_init(init);
++module_exit(fini);
++
+diff --git a/drivers/openhv/irq_reflect.c b/drivers/openhv/irq_reflect.c
+new file mode 100644
+index 0000000..ed24563
+--- /dev/null
++++ b/drivers/openhv/irq_reflect.c
+@@ -0,0 +1,154 @@
++/* /dev/hcall: device for userspace access to hypervisor, and memory.
++ *
++ * Copyright (C) 2004, Rusty Russell IBM Corporation.
++ * Copyright (C) 2005, Michal Ostrowski IBM Corporation.
++ *
++ *  This program is free software; you can redistribute it and/or
++ *  modify it under the terms of the GNU General Public License
++ *  as published by the Free Software Foundation; either version
++ *  2 of the License, or (at your option) any later version.
++ */
++#include <linux/list.h>
++#include <linux/slab.h>
++#include <linux/fs.h>
++#include <linux/sched.h>
++#include <linux/mm.h>
++#include <linux/init.h>
++#include <linux/spinlock.h>
++#include <linux/openhv.h>
++#include <linux/interrupt.h>
++#include <asm/errno.h>
++#include <asm/hvcall.h>
++#include <asm/uaccess.h>
++#include <asm/io.h>
++#include <asm/setup.h>
++#include "openhv_internal.h"
++
++struct reflector
++{
++	struct list_head reflist;
++	struct list_head file_list;
++	struct file* handle;
++
++	/* Here's who to signal, if we're triggered. */
++	struct task_struct *p;
++	int sig;
++	int interrupt;
++	int virq;
++};
++
++
++
++spinlock_t ref_lock = SPIN_LOCK_UNLOCKED;
++struct list_head reflist = LIST_HEAD_INIT(reflist);
++
++
++int ref_handler(int irq, void* data, struct pt_regs* regs)
++{
++	struct reflector *ref = (struct reflector*)data;
++	struct siginfo info;
++	unsigned long flags;
++	spin_lock_irqsave(&ref_lock, flags);
++	if (ref->virq == irq) {
++		info.si_errno = 0;
++		info.si_code = 0;
++		info.si_signo = ref->sig;
++		info.si_addr = (void*)(unsigned long)ref->virq;
++		send_sig_info(ref->sig, &info, ref->p);
++	}
++	spin_unlock_irqrestore(&ref_lock, flags);
++	return IRQ_HANDLED;
++}
++
++
++int do_config_reflect(struct file* f, void __user *arg)
++{
++	oh_reflect_args or;
++	struct reflector *ref;
++	struct hcall_file_priv *hfp = (struct hcall_file_priv*)f->private_data;
++	unsigned long flags;
++	int ret = 0;
++
++	if (copy_from_user(&or, arg, sizeof(or)) != 0)
++		return -EFAULT;
++
++	spin_lock_irqsave(&ref_lock, flags);
++
++	list_for_each_entry (ref, &reflist, reflist) {
++		if (ref->handle == f && ref->p == current)
++			break;
++		
++	}
++
++	/* This means deregister */
++	if (or.oh_signal == -1) {
++		if (ref) {
++			spin_lock(&hfp->hfp_lock);
++			list_del(&ref->file_list);
++			spin_unlock(&hfp->hfp_lock);
++			
++			list_del(&ref->reflist);
++			kfree(ref);
++		}
++	} else if (or.oh_signal <= _NSIG) {
++		int irq = map_hv_irq(or.oh_interrupt);
++		if(irq < 0) {
++			ret = -EINVAL;
++			goto abort;
++		} 
++
++
++		ref = kmalloc(sizeof(struct reflector), GFP_KERNEL);
++		ref->handle = f;
++		INIT_LIST_HEAD(&ref->reflist);
++		INIT_LIST_HEAD(&ref->file_list);
++
++		
++		ref->p = current;
++		ref->sig = or.oh_signal;
++		ref->interrupt = or.oh_interrupt;
++		ref->virq = irq;
++
++		ret = request_irq(irq, ref_handler, 0, 
++				  "OH Int Reflector", ref);
++
++		if(ret >= 0){
++			spin_lock(&hfp->hfp_lock);
++			list_add(&hfp->hfp_reflist, &ref->file_list);
++			spin_unlock(&hfp->hfp_lock);
++			list_add(&reflist, &ref->reflist);
++		} else {
++			kfree(ref);
++			ret = -EINVAL;
++		}
++		
++	} else {
++		ret = -EINVAL;
++	}
++abort:
++	spin_unlock_irqrestore(&ref_lock, flags);
++
++	return ret;
++}
++
++void irq_reflect_release(struct inode *i, struct file* f)
++{
++	struct hcall_file_priv *hfp = f->private_data;
++	
++	struct reflector *ref;
++	struct reflector *tmp;
++	unsigned long flags;
++	spin_lock_irqsave(&ref_lock, flags);
++	
++	
++	list_for_each_entry_safe(ref, tmp, &hfp->hfp_reflist, file_list){
++		unmap_hv_irq(ref->interrupt);
++		free_irq(ref->virq, ref);
++		list_del(&ref->reflist);
++		list_del(&ref->file_list);
++		kfree(ref);
++
++	}
++
++	spin_unlock_irqrestore(&ref_lock, flags);
++}
+diff --git a/drivers/openhv/mem_hold.c b/drivers/openhv/mem_hold.c
+new file mode 100644
+index 0000000..1792008
+--- /dev/null
++++ b/drivers/openhv/mem_hold.c
+@@ -0,0 +1,116 @@
++/* /dev/hcall: device for userspace access to hypervisor, and memory.
++ *
++ * Copyright (C) 2004, Rusty Russell IBM Corporation.
++ * Copyright (C) 2005, Michal Ostrowski IBM Corporation.
++ *
++ *  This program is free software; you can redistribute it and/or
++ *  modify it under the terms of the GNU General Public License
++ *  as published by the Free Software Foundation; either version
++ *  2 of the License, or (at your option) any later version.
++ */
++#include <linux/list.h>
++#include <linux/slab.h>
++#include <linux/fs.h>
++#include <linux/sched.h>
++#include <linux/mm.h>
++#include <linux/init.h>
++#include <linux/spinlock.h>
++#include <linux/openhv.h>
++#include <asm/errno.h>
++#include <asm/hvcall.h>
++#include <asm/uaccess.h>
++#include <asm/io.h>
++#include <asm/setup.h>
++#include "openhv_internal.h"
++
++
++
++int do_config_mem_hold(struct file* f, void __user *arg)
++{
++	oh_mem_hold_args mh;
++	struct hcall_file_priv *hfp = (struct hcall_file_priv*)f->private_data;
++	struct hmem_share *hs = NULL;
++	int ret = 0;
++	char *ptr = NULL;
++	if (copy_from_user(&mh, arg, sizeof(mh)) != 0)
++		return -EFAULT;
++
++	spin_lock(&hfp->hfp_lock);
++
++	mh.size = PAGE_ALIGN(mh.size);
++
++	ret = -ENOMEM;
++	hs = kmalloc(sizeof(*hs), GFP_KERNEL);
++	if(hs) {
++		ptr = kmalloc(mh.size, GFP_KERNEL);
++		if(ptr) {
++			int i = 0;
++			for(; i < mh.size; i+= PAGE_SIZE){
++				SetPageReserved(virt_to_page(ptr + i));
++			}
++
++			mh.laddr = virt_to_phys(ptr);
++			hs->addr = (long)ptr;
++			hs->len  = mh.size;
++			ret = 0;
++		}
++	}
++	
++	spin_unlock(&hfp->hfp_lock);
++
++	if(ret == 0) {
++		if (copy_to_user(arg, &mh, sizeof(mh)) != 0) {
++			if(hs) kfree(hs);
++			if(ptr) kfree(ptr);
++			return -EFAULT;
++		}
++
++		INIT_LIST_HEAD(&hs->list);
++		list_add(&hfp->hfp_holdlist, &hs->list);
++	}
++
++	return ret;
++}
++
++int check_hold_mem(struct file *f, unsigned long start, unsigned long size)
++{
++	struct hcall_file_priv *hfp = (struct hcall_file_priv*)f->private_data;
++	struct hmem_share *hs;
++	int ret = 0;
++	spin_lock(&hfp->hfp_lock);
++
++	list_for_each_entry(hs, &hfp->hfp_holdlist, list) {
++		if(virt_to_phys((void*)hs->addr) <= start && 
++		   virt_to_phys((void*)hs->addr) + hs->len >= start + size) {
++			ret = 1;
++			break;
++		}
++	}
++	
++	spin_unlock(&hfp->hfp_lock);
++	return ret;
++}
++
++
++void mem_hold_release(struct inode *i, struct file* f)
++{
++	struct hcall_file_priv *hfp = f->private_data;
++	
++	struct hmem_share *ref;
++	struct hmem_share *tmp;
++	spin_lock(&hfp->hfp_lock);
++	
++	
++	list_for_each_entry_safe(ref, tmp, &hfp->hfp_holdlist, list){
++		int i = 0;
++		for(; i < ref->len; i+= PAGE_SIZE){
++			ClearPageReserved(virt_to_page(ref->addr + i));
++		}
++		list_del(&ref->list);
++
++		kfree((void*)ref->addr);
++		kfree(ref);
++	}
++
++	spin_unlock(&hfp->hfp_lock);
++}
+diff --git a/drivers/openhv/openhv_internal.h b/drivers/openhv/openhv_internal.h
+new file mode 100644
+index 0000000..2803bed
+--- /dev/null
++++ b/drivers/openhv/openhv_internal.h
+@@ -0,0 +1,30 @@
++/* /dev/hcall: device for userspace access to hypervisor, and memory.
++ *
++ * Copyright (C) 2004, Rusty Russell IBM Corporation.
++ * Copyright (C) 2005, Michal Ostrowski IBM Corporation.
++ *
++ *  This program is free software; you can redistribute it and/or
++ *  modify it under the terms of the GNU General Public License
++ *  as published by the Free Software Foundation; either version
++ *  2 of the License, or (at your option) any later version.
++ */
++struct hmem_share
++{
++	struct list_head list;
++	long addr;
++	long len;
++};
++
++
++struct hcall_file_priv {
++	spinlock_t	 hfp_lock;
++	struct list_head hfp_reflist;	/* reflector request list */
++	struct list_head hfp_holdlist;  /* list of memory holds */
++};
++
++int do_config_reflect(struct file* f, void __user *arg);
++void irq_reflect_release(struct inode *i, struct file* f);
++
++int do_config_mem_hold(struct file* f, void __user *arg);
++void mem_hold_release(struct inode *i, struct file* f);
++int check_hold_mem(struct file *f, unsigned long start, unsigned long size);
+diff --git a/include/asm-powerpc/elf.h b/include/asm-powerpc/elf.h
+index 3dcd65e..adb5cec 100644
+--- a/include/asm-powerpc/elf.h
++++ b/include/asm-powerpc/elf.h
+@@ -1,7 +1,6 @@
+ #ifndef _ASM_POWERPC_ELF_H
+ #define _ASM_POWERPC_ELF_H
+ 
+-#include <linux/sched.h>	/* for task_struct */
+ #include <asm/types.h>
+ #include <asm/ptrace.h>
+ #include <asm/cputable.h>
+@@ -175,6 +174,7 @@ typedef elf_vrreg_t elf_vrregset_t32[ELF
+ #define ELF_ET_DYN_BASE         (0x08000000)
+ 
+ #ifdef __KERNEL__
++#include <linux/sched.h>	/* for task_struct */
+ 
+ /* Common routine for both 32-bit and 64-bit processes */
+ static inline void ppc_elf_core_copy_regs(elf_gregset_t elf_regs,
+diff --git a/include/asm-powerpc/hvcall.h b/include/asm-powerpc/hvcall.h
+index d36da61..dbd6dab 100644
+--- a/include/asm-powerpc/hvcall.h
++++ b/include/asm-powerpc/hvcall.h
+@@ -169,5 +169,15 @@ long plpar_hcall_4out(unsigned long opco
+ 		      unsigned long *out3,
+ 		      unsigned long *out4);
+ 
++/* plpar_hcall_generic()
++ * 
++ * generic hcall pass-thru mechanism
++ *
++ */
++long plpar_hcall_generic(unsigned long opcode, 
++			 unsigned long in_args[8],	
++			 unsigned long out_args[8]);
++
++
+ #endif /* __ASSEMBLY__ */
+ #endif /* _ASM_POWERPC_HVCALL_H */
+diff --git a/include/asm-powerpc/irq.h b/include/asm-powerpc/irq.h
+index 8eb7e85..dc369ef 100644
+--- a/include/asm-powerpc/irq.h
++++ b/include/asm-powerpc/irq.h
+@@ -77,6 +77,7 @@ extern unsigned int real_irq_to_virt_slo
+ #define IC_ISERIES    4
+ 
+ extern u64 ppc64_interrupt_controller;
++extern unsigned int ppc_unmapped_irqs;
+ 
+ #else /* 32-bit */
+ 
+diff --git a/include/asm-powerpc/openhv.h b/include/asm-powerpc/openhv.h
+new file mode 100644
+index 0000000..6ae4da5
+--- /dev/null
++++ b/include/asm-powerpc/openhv.h
+@@ -0,0 +1,52 @@
++/* /dev/hcall: device for userspace access to hypervisor, and memory.
++ *
++ * Copyright (C) 2004, Rusty Russell IBM Corporation.
++ * Copyright (C) 2005, Michal Ostrowski IBM Corporation.
++ *
++ *  This program is free software; you can redistribute it and/or
++ *  modify it under the terms of the GNU General Public License
++ *  as published by the Free Software Foundation; either version
++ *  2 of the License, or (at your option) any later version.
++ */
++/* 
++ * Hypervisor structures
++ */
++#ifndef __PPC_OPENHV_H_
++#define __PPC_OPENHV_H_
++
++#include <asm/types.h>
++
++
++#ifndef __ASSEMBLY__
++
++/* ppc64 register size type */
++typedef __u64 oh_reg_t;
++
++extern void oh_use_virq(unsigned long virq);
++
++struct pt_regs;
++extern int ohic_get_irq(struct pt_regs *regs);
++
++extern void hvpr_init_early(void);
++
++
++#define OH_HCALL_NUM_ARGS	8
++typedef struct {
++	oh_reg_t retval;
++	oh_reg_t opcode;
++	oh_reg_t args[OH_HCALL_NUM_ARGS];
++} oh_hcall_args;
++
++#ifdef __KERNEL__
++
++static inline int oh_generic_hcall(oh_hcall_args *args)
++{
++	args->retval = plpar_hcall_generic(args->opcode, 
++					   args->args, args->args);
++	return 0;
++}
++#endif /* __KERNEL__ */
++
++#endif /* __ASSEMBLY__ */
++
++#endif /* __PPC_OPENHV_H_ */
+diff --git a/include/asm-powerpc/processor.h b/include/asm-powerpc/processor.h
+index d12382d..388dfe7 100644
+--- a/include/asm-powerpc/processor.h
++++ b/include/asm-powerpc/processor.h
+@@ -30,6 +30,7 @@
+ #define PLATFORM_LPAR		0x0001
+ #define PLATFORM_POWERMAC	0x0400
+ #define PLATFORM_MAPLE		0x0500
++#define PLATFORM_MAPLE_LPAR	0x0501
+ #define PLATFORM_PREP		0x0600
+ #define PLATFORM_CHRP		0x0700
+ #define PLATFORM_CELL		0x1000
+diff --git a/include/linux/openhv.h b/include/linux/openhv.h
+new file mode 100644
+index 0000000..d65f646
+--- /dev/null
++++ b/include/linux/openhv.h
+@@ -0,0 +1,50 @@
++/* /dev/hcall: device for userspace access to hypervisor, and memory.
++ *
++ * Copyright (C) 2004, Rusty Russell IBM Corporation.
++ * Copyright (C) 2005, Michal Ostrowski IBM Corporation.
++ *
++ *  This program is free software; you can redistribute it and/or
++ *  modify it under the terms of the GNU General Public License
++ *  as published by the Free Software Foundation; either version
++ *  2 of the License, or (at your option) any later version.
++ */
++/* 
++ * Hypervisor structures
++ */
++#ifndef __LINUX_OPENHV_H_
++#define __LINUX_OPENHV_H_
++
++#include <asm/types.h>
++#include <linux/ioctl.h>
++#include <asm/openhv.h>
++
++
++#ifndef __ASSEMBLY__
++
++#define INVALID_MEM_RANGE (~((unsigned long)0))
++
++typedef struct
++{
++	int	oh_interrupt;
++	int	oh_signal;
++} oh_reflect_args;
++
++typedef struct 
++{
++	oh_reg_t laddr; /* output, logical address given */
++	oh_reg_t size;  /* input/output, size of region */
++} oh_mem_hold_args;
++
++extern int oh_generic_hcall(oh_hcall_args *args);
++
++#define OH_GENHCALL	_IOWR('h', 0, oh_hcall_args)
++#define OH_IRQ_REFLECT	_IOWR('h', 1, oh_reflect_args)
++#define OH_MEM_HOLD	_IOWR('h', 2, oh_mem_hold_args)
++
++
++extern int unmap_hv_irq(unsigned int irq);
++extern int map_hv_irq(unsigned int irq);
++
++#endif /* __ASSEMBLY__ */
++
++#endif /* __LINUX_OPENHV_H_ */
