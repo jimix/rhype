@@ -59,14 +59,14 @@ int verbose = 0;
 int hcall_fd;
 oh_hcall_args hargs;
 
-static uval crq;
-static int vtys;
+static hval crq;
+static int vtys = 0;
 static int wait_for_key;
-static uval console_ua = 0;
+static uval64 console_ua = 0;
 
 struct laddr_range {
-	uval lr_base;
-	uval lr_size;
+	hval lr_base;
+	hval lr_size;
 };
 
 struct laddr_range lranges[16] = { {0, 0}, };
@@ -105,10 +105,10 @@ bailout(const char *msg, ...)
 }
 
 static int
-laddr_load(char *file, uval64 laddr, uval *base)
+laddr_load(char *file, hval laddr, hval *base)
 {
-	uval64 chunk = ALIGN_DOWN(laddr, CHUNK_SIZE);
-	uval64 offset = laddr - chunk;
+	hval chunk = ALIGN_DOWN(laddr, CHUNK_SIZE);
+	hval offset = laddr - chunk;
 	char *ptr = mmap(NULL, CHUNK_SIZE,
 			 PROT_READ | PROT_WRITE, MAP_SHARED,
 			 hcall_fd, chunk);
@@ -129,7 +129,7 @@ laddr_load(char *file, uval64 laddr, uval *base)
 			size += ret;
 
 	} while (ret > 0);
-	msg("Loaded to 0x%llx[0x%x] %s\n", laddr, size, file);
+	msg("Loaded to " HVAL "[0x%x] %s\n", laddr, size, file);
 
 	*base = (uval)ptr;
 	return size;
@@ -158,35 +158,35 @@ run_command(const char *const argv[])
 }
 
 static int
-of_add_memory(uval64 laddr, uval64 size)
+of_add_memory(hval laddr, hval size)
 {
 	char name[64];
 	int ret;
 
-	snprintf(name, 64, "/memory@0x%llx", laddr);
+	snprintf(name, 64, "/memory@" HVAL, laddr);
 
 	ret = of_make_node(name);
 
 	of_set_prop(name, "name", "memory", -1);
 	of_set_prop(name, "device_type", "memory", -1);
 
-	uval64 x = 2;
+	hval x = 2;
 
 	of_set_prop(name, "#address-cells", &x, sizeof (x));
 	of_set_prop(name, "#size-cells", &x, sizeof (x));
 
-	uval64 reg[2] = { laddr, size };
+	hval reg[2] = { laddr, size };
 	of_set_prop(name, "reg", &reg, sizeof (reg));
 	return 0;
 }
 
 #ifdef __PPC__
 static int
-load_of(uval64 rmo_start, uval64 rmo_size)
+load_of(hval rmo_start, hval rmo_size)
 {
 	uval32 stub_addr = rmo_size - (1 << 20);
 	char mem_node[64];
-	uval64 prop[2];
+	hval prop[2];
 	int ret;
 
       retry:
@@ -240,7 +240,7 @@ load_of(uval64 rmo_start, uval64 rmo_size)
 
 	close(fd);
 
-	uval x;
+	hval x;
 
 	msg("Loading OF stub: 0x%x[0x%x]\n", stub_addr, stub_size);
 	msg("Loading OF data: 0x%x[0x%x]\n", data_addr, data_size);
@@ -285,8 +285,8 @@ parse_args(int argc, char **argv)
 		case 'm':{
 				struct laddr_range *lr = &lranges[num_ranges];
 
-				if (!parse_laddr
-				    (optarg, &lr->lr_base, &lr->lr_size)) {
+				if (!parse_laddr(optarg, 
+						 &lr->lr_base, &lr->lr_size)) {
 					++num_ranges;
 				} else {
 					ret = -1;
@@ -346,9 +346,11 @@ clean_vdevices()
 }
 
 static int
-add_memory(uval lpid, uval base, uval size)
+add_memory(int idx, hval lpid, hval base, hval size)
 {
-	uval64 laddr;
+	hval laddr;
+	char name[64];
+	snprintf(name, 64, "memory_%d", idx);
 
 	hargs.opcode = H_RESOURCE_TRANSFER;
 	hargs.args[0] = MEM_ADDR;
@@ -356,16 +358,22 @@ add_memory(uval lpid, uval base, uval size)
 	hargs.args[2] = base;
 	hargs.args[3] = size;
 	hargs.args[4] = lpid;
-	int ret = hcall(&hargs);
 
-	ASSERT(ret >= 0 && hargs.retval == 0,
-	       "hcall failure: %d " UVAL_CHOOSE("0x%x", "0x%lx") "\n", ret,
-	       hargs.retval);
-
-	laddr = hargs.args[0];
-	msg("add memory: %lx %lx -> %llx\n", base, size, laddr);
+	if (idx != 0) {
+		int ret = hcall(&hargs);
+		HCALL_FAIL_CHECK(ret, hargs.retval);
+		laddr = hargs.args[0];
+	} else {
+		laddr = 0;
+	}
+	
+	msg("add memory: " HVAL " " HVAL " -> " HVAL "\n", base, size, laddr);
 
 	of_add_memory(laddr, size);
+
+	set_file_printf(name, HVAL " " HVAL  " " HVAL "\n", 
+			base, laddr, size);
+	
 	return 0;
 }
 
@@ -387,7 +395,7 @@ add_vty(uval32 liobn)
 }
 
 static uval32
-add_vterm(sval chan, uval lpid)
+add_vterm(sval chan, hval lpid)
 {
 	int ret;
 
@@ -397,9 +405,7 @@ add_vterm(sval chan, uval lpid)
 	hargs.args[2] = 0;
 
 	ret = hcall(&hargs);
-	ASSERT(ret >= 0 && hargs.retval == 0,
-	       "hcall failure: %d " UVAL_CHOOSE("0x%x", "0x%lx") "\n", ret,
-	       hargs.retval);
+	HCALL_FAIL_CHECK(ret, hargs.retval);
 
 	uval32 liobn = hargs.args[0];
 
@@ -412,9 +418,7 @@ add_vterm(sval chan, uval lpid)
 	hargs.args[4] = lpid;
 
 	hcall(&hargs);
-	ASSERT(ret >= 0 && hargs.retval == 0,
-	       "hcall failure: %d " UVAL_CHOOSE("0x%x", "0x%lx") "\n", ret,
-	       hargs.retval);
+	HCALL_FAIL_CHECK(ret, hargs.retval);
 
 	/* FIXME on failure HVIO_RELEASE */
 
@@ -427,7 +431,7 @@ add_vterm(sval chan, uval lpid)
 }
 
 static int
-add_vscsi(uval lpid, uval liobn, uval dma_sz)
+add_vscsi(hval lpid, hval liobn, hval dma_sz)
 {
 	static const char fmt[] = "/vdevice/v-scsi@%x";
 	char vscsi_node[sizeof (fmt) + 8 - 1];
@@ -449,10 +453,7 @@ add_vscsi(uval lpid, uval liobn, uval dma_sz)
 	hargs.args[4] = lpid;
 
 	ret = hcall(&hargs);
-	ASSERT(ret >= 0 && hargs.retval == 0,
-	       "hcall vscsi transfer failure: %d " UVAL_CHOOSE("0x%x",
-							       "0x%lx") "\n",
-	       ret, hargs.retval);
+	HCALL_FAIL_CHECK_MSG(ret, hargs.retval, "vscsi transfer");
 
 	dma[0] = liobn;
 	dma[4] = dma_sz;
@@ -472,14 +473,14 @@ add_vscsi(uval lpid, uval liobn, uval dma_sz)
 }
 
 static int
-add_vdev(uval lpid, uval vdev)
+add_vdev(hval lpid, hval vdev)
 {
 	char p[512];
 	int fd;
 	int rc = -1;
 	static const char vscsis[] = "v-scsi-host\n";
 
-	snprintf(p, sizeof (p), "/sys/devices/vio/%lx/name", vdev);
+	snprintf(p, sizeof (p), "/sys/devices/vio/%lx/name", (long)vdev);
 	fd = open(p, O_RDONLY);
 	if (fd != -1) {
 		char name[64];
@@ -490,7 +491,8 @@ add_vdev(uval lpid, uval vdev)
 			if (strncmp(name, vscsis, sizeof (vscsis)) == 0) {
 				/* we know the lient crq is +1 */
 				++vdev;
-				printf("calling add_vscsi(0x%lx)\n", vdev);
+				printf("calling add_vscsi(0x%lx)\n", 
+				       (long)vdev);
 				rc = add_vscsi(lpid, vdev, 0x00800000);
 			}
 		}
@@ -499,7 +501,7 @@ add_vdev(uval lpid, uval vdev)
 }
 
 static int
-add_llan(uval lpid)
+add_llan(uval64 lpid)
 {
 	int ret;
 
@@ -510,7 +512,7 @@ add_llan(uval lpid)
 
 	ret = hcall(&hargs);
 	ASSERT(ret >= 0 && hargs.retval == 0,
-	       "hcall failure: %d " UVAL_CHOOSE("0x%x", "0x%lx") "\n", ret,
+	       "hcall failure: %d " UVAL_CHOOSE("0x%llx", "0x%lx") "\n", ret,
 	       hargs.retval);
 
 	uval32 liobn = hargs.args[0];
@@ -525,7 +527,7 @@ add_llan(uval lpid)
 
 	ret = hcall(&hargs);
 	ASSERT(ret >= 0 && hargs.retval == 0,
-	       "hcall failure: %d " UVAL_CHOOSE("0x%x", "0x%lx") "\n", ret,
+	       "hcall failure: %d " UVAL_CHOOSE("0x%llx", "0x%lx") "\n", ret,
 	       hargs.retval);
 
 	/* FIXME on failure HVIO_RELEASE */
@@ -563,11 +565,11 @@ add_llan(uval lpid)
 
 #ifdef __PPC__
 static int
-add_htab(uval lpid, uval size)
+add_htab(hval lpid, hval size)
 {
 	static uval32 ibm_pft_size[] = { 0x0, 0x0 };
-	uval s = 1;
-	uval lsize = 0;
+	uval64 s = 1;
+	hval lsize = 0;
 	char cpu_node[64];
 	uval cpu;
 	int ret;
@@ -585,7 +587,7 @@ add_htab(uval lpid, uval size)
 	hargs.args[1] = lsize;
 
 	ret = hcall(&hargs);
-	ASSERT(ret >= 0, "hcall(HTAB, 0x%lx\n", lsize);
+	ASSERT(ret >= 0, "hcall(HTAB, " HVAL ")\n", lsize);
 
 	ibm_pft_size[1] = lsize;
 
@@ -602,9 +604,12 @@ add_htab(uval lpid, uval size)
 
 #ifdef __i386__
 static int
-fill_pinfo(struct partition_info *pinfo, uval lpid, uval rmo_size)
+fill_pinfo(struct partition_info *pinfo, uval64 lpid, uval64 rmo_size)
 {
 	int i;
+	memset(pinfo, 0, sizeof(*pinfo));
+	pinfo->large_page_size1 = LARGE_PAGE_SIZE16M;
+	pinfo->large_page_size2 = DEFAULT_LARGE_PAGE_SIZE2;
 	pinfo->lpid = lpid;
 	for (i = 0; i < MAX_MEM_RANGES; i++) {
 		pinfo->mem[i].size = INVALID_MEM_RANGE;
@@ -614,14 +619,14 @@ fill_pinfo(struct partition_info *pinfo, uval lpid, uval rmo_size)
 }
 
 static int
-inject_pinfo(struct partition_info *pinfo, uval length,
-             uval base, uval img_offset)
+inject_pinfo(struct partition_info *pinfo, uval64 length,
+             uval64 base, uval64 img_offset)
 {
 	int rc = 0;
 	char *img_base = (char *)base;
 	char *magic = &img_base[img_offset + 0x10];
 	if (*(uval64 *)magic == HYPE_PARTITION_INFO_MAGIC_NUMBER) {
-		uval offset = *((uval *)(magic + 8));
+		uval64 offset = *((uval64 *)(magic + 8));
 		memcpy(&img_base[offset],
 		       pinfo,
 		       length);
@@ -631,7 +636,7 @@ inject_pinfo(struct partition_info *pinfo, uval length,
 }
 
 static int
-add_cmdlineargs(uval base, uval offset, uval lpid)
+add_cmdlineargs(uval64 base, uval64 offset, uval64 lpid)
 {
 	struct os_args os_args;
 	const char stdparms[] = " pci=off ide=off";
@@ -691,7 +696,7 @@ main(int argc, char **argv)
 
 	if (ret < 0)
 		return ret;
-	uval total = 0;
+	hval total = 0;
 
 	ASSERT(num_ranges > 0, "No memory ranges specified\n");
 
@@ -700,11 +705,11 @@ main(int argc, char **argv)
 		bailout("Partition not ready\n");
 	}
 
-	uval rmo_start = lranges[0].lr_base;
-	uval rmo_size = lranges[0].lr_size;
-	uval laddr = 0;
-	uval img_base = 0;
-	uval img_offset = 0;
+	hval rmo_start = lranges[0].lr_base;
+	hval rmo_size = lranges[0].lr_size;
+	hval laddr = 0;
+	hval img_base = 0;
+	hval img_offset = 0;
 	int count = 0;
 
 	while (count < 255) {
@@ -712,7 +717,7 @@ main(int argc, char **argv)
 		char image_laddr[256];
 		char data[64];
 		struct stat sbuf;
-		uval base;
+		hval base;
 
 		snprintf(image, sizeof(image), HYPE_ROOT "/%s/image%02x",
 			 oh_pname, count);
@@ -725,7 +730,7 @@ main(int argc, char **argv)
 
 		ret = get_file(image_laddr, data, sizeof(data));
 		if (ret >= 0) {
-			uval64 l = strtoull(data, NULL, 0);
+			hval l = strtoull(data, NULL, 0);
 
 			ASSERT(errno != ERANGE, "Corrupted data %s\n",
 			       image_laddr);
@@ -744,15 +749,15 @@ main(int argc, char **argv)
 	}
 
 	char pinfo_buf[64];
-	uval64 pinfo;
+	hval pinfo;
 
 	ret = get_file("pinfo", pinfo_buf, sizeof(pinfo_buf));
 
 	if (ret <= 0 || (pinfo = strtoull(pinfo_buf, NULL, 0)) <= 0) {
-		pinfo = (uval64)-1;
+		pinfo = (hval)-1;
 	}
 
-	uval lpid;
+	hval lpid;
 
 
 
@@ -763,7 +768,7 @@ main(int argc, char **argv)
 
 	ret = hcall(&hargs);
 	ASSERT(ret >= 0 && hargs.retval == 0,
-	       "hcall failure: %d " UVAL_CHOOSE("0x%x", "0x%lx") "\n", ret,
+	       "hcall failure: %d " UVAL_CHOOSE("0x%llx", "0x%lx") "\n", ret,
 	       hargs.retval);
 
 	lpid = hargs.args[0];
@@ -774,17 +779,16 @@ main(int argc, char **argv)
 
 	clean_vdevices();
 
-
-	of_add_memory(0, rmo_size);
+	add_memory(0, 0, 0, rmo_size);
 	total += rmo_size;
 
 	int i = 1;
 
 	while (i < num_ranges) {
-		uval64 base = lranges[i].lr_base;
-		uval64 size = lranges[i].lr_size;
+		hval base = lranges[i].lr_base;
+		hval size = lranges[i].lr_size;
 
-		add_memory(lpid, base, size);
+		add_memory(i, lpid, base, size);
 		total += size;
 		++i;
 	}
@@ -799,7 +803,7 @@ main(int argc, char **argv)
 		vtys = 1;
 	}
 
-	uval64 vty0 = 0;
+	hval vty0 = 0;
 
 	if (vtys == 0 && console_ua == 0) {
 		add_vty(0);
@@ -820,22 +824,21 @@ main(int argc, char **argv)
 	if (crq > 0) {
 		ret = add_vdev(lpid, crq);
 		if (ret == -1) {
-			fprintf(stderr, "vdev failed : 0x%lx\n", crq);
+			fprintf(stderr, "vdev failed : " HVAL "\n", crq);
 			return 1;
 		}
 	}
 
 	if (console_ua) {
-		printf("Registering console vterm: 0x%lx -> 0x%lx:0x%llx\n",
+		printf("Registering console vterm: " 
+		       "0x%llx -> " HVAL ":" HVAL"\n",
 		       console_ua, lpid, vty0);
 		hargs.opcode = H_REGISTER_VTERM;
 		hargs.args[0] = console_ua;
 		hargs.args[1] = lpid;
 		hargs.args[2] = vty0;
 		ret = hcall(&hargs);
-		ASSERT(ret >= 0 && hargs.retval == 0,
-		       "hcall failure: %d " UVAL_CHOOSE("0x%x", "0x%lx") "\n",
-		       ret, hargs.retval);
+		HCALL_FAIL_CHECK(ret, hargs.retval);
 	}
 
 	add_llan(lpid);
@@ -863,7 +866,7 @@ main(int argc, char **argv)
 	hargs.args[3] = 0;
 	ret = hcall(&hargs);
 	ASSERT(ret >= 0 && hargs.retval == 0,
-	       "hcall failure: %d " UVAL_CHOOSE("0x%x", "0x%lx") "\n", ret,
+	       "hcall failure: %d " UVAL_CHOOSE("0x%llx", "0x%lx") "\n", ret,
 	       hargs.retval);
 
 	hargs.opcode = H_START;
@@ -903,7 +906,7 @@ main(int argc, char **argv)
 	printf("Starting...\n");
 	hcall(&hargs);
 	ASSERT(ret >= 0 && hargs.retval == 0,
-	       "hcall failure: %d " UVAL_CHOOSE("0x%x", "0x%lx") "\n", ret,
+	       "hcall failure: %d " UVAL_CHOOSE("0x%llx", "0x%lx") "\n", ret,
 	       hargs.retval);
 
 	set_file("state", "RUNNING", -1);
