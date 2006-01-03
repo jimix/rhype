@@ -37,10 +37,6 @@ cpu_core_init(uval ofd, uval cpuno, uval cpuseq)
 	uval old4, new4;
 	uval old5, new5;
 
-//	__asm__ __volatile__("isync; slbia; isync" : : : "memory");
-//	slbia();
-//	slbie(0);
-
 	union hid0 hid0 = { .word = get_hid0() };
 	old0 = hid0.word;
 	hid0.bits.nap = 1;
@@ -101,7 +97,7 @@ cpu_core_init(uval ofd, uval cpuno, uval cpuseq)
 	set_hid5(hid5.word);
 
 	slbia();
-	slbie(0);
+	slbie_0();
 
 	hprintf("hid0: 0x%016lx -> 0x%016lx\n", old0, new0);
 	hprintf("hid1: 0x%016lx -> 0x%016lx\n", old1, new1);
