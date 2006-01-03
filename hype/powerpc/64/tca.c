@@ -139,7 +139,7 @@ preempt_thread(struct cpu_thread *thread, uval timer)
 
 	/* we are ceding this threads cycles - go dormant */
 	save_sprs(thread);
-	save_slb(thread);
+	save_slb(&thread->slbcache);
 	save_float(thread);
 	tca->old_thread = tca->active_thread;
 
@@ -177,29 +177,13 @@ check_and_deliver_externals(struct cpu_thread *thread)
 	}
 
 #ifndef FORCE_APPLE_MODE
-	uval srr_mask = ~(MSR_IR | MSR_DR | MSR_FE0 | MSR_PR |
-			  MSR_FE1 | MSR_EE | MSR_RI);
-
-	DEBUG_MT(DBG_EE, "%s: LPAR[0x%x] direct\n",
-		 __func__, thread->cpu->os->po_lpid);
-	uval vector = 0x500;
-
-	thread->reg_srr0 = thread->reg_hsrr0;
-	/* SRR1[33:36] & SRR1[42:47] set to 0 */
-	thread->reg_srr1 = thread->reg_hsrr1 &
-		~0x00000000783f0000;
-
-	thread->reg_hsrr0 = vector;
-	thread->reg_hsrr1 = thread->reg_hsrr1 & srr_mask;
-
-	thread->reg_hsrr1 = srr1_set_sf(thread->reg_hsrr1);
+	set_to_exception(thread, 0x500, thread->reg_hsrr0, thread->reg_hsrr1);
 #else
 	if (!(thread->vregs->v_msr & MSR_EE)) {
 		/* defer the delivery */
 		thread_set_MER(thread, 1);
 		return external_present;
 	}
-
 
 	insert_exception(thread, EXC_V_EXT);
 	thread->reg_hsrr0 = get_tca()->srr0;
@@ -365,31 +349,36 @@ wakeup_partner_thread(void)
 }
 
 void __attribute__ ((noreturn))
-resume_thread(void)
+resume_thread(struct cpu_thread *thread)
 {
 	struct thread_control_area *tca = get_tca();
-	struct cpu_thread *thread = tca->active_thread;
 	int primary_thread = (tca->thread_index == 0);
 
+	/* update the struct cpu_thread binding */
+	tca->old_thread = tca->active_thread;
+	tca->active_thread = thread;
+
+
+	if (thread != tca->old_thread && tca->old_thread) {
+		save_sprs(tca->old_thread);
+		save_slb(&tca->old_thread->slbcache);
+	}
+
+	if (thread != tca->old_thread  && thread) {
 #ifdef TRACK_LPAR_ENTRY
 	hprintf("%s[%u]: Enter LPAR:[0x%x] @ 0x%016lx\n",
 		__func__, !primary_thread, thread->cpu->os->po_lpid,
 		thread->reg_hsrr0);
 #endif
-	if (tca->active_thread != tca->old_thread) {
-		if (primary_thread) {
-			/* primary thread work goes here */
+		switch_float(tca->old_thread, tca->active_thread);
 
-#ifdef HAS_TAGGED_TLB
-			if (thread->cpu->tlb_flush_pending) {
-				hprintf("%s: flushing TLB before resume\n",
-					__func__);
-				tlbia();
-				thread->cpu->tlb_flush_pending = 0;
-			}
-#else
-			tlbia();
-#endif
+
+		if (primary_thread) {
+			switch_large_page_support(tca->old_thread,
+						  tca->active_thread);
+
+			/* primary thread work goes here */
+			tlb_switch(thread->cpu);
 
 			ptesync();
 			mtsdr1(thread->cpu->reg_sdr1);
@@ -398,7 +387,6 @@ resume_thread(void)
 			sync_with_partner_thread();
 			sync_with_partner_thread();
 			mtlpidr(thread->cpu->os->po_lpid_tag);
-			restore_large_page_selection(thread);
 			sync_with_partner_thread();
 		} else {
 			/* secondary thread work goes here */
@@ -412,11 +400,13 @@ resume_thread(void)
 		imp_switch_to_thread(thread);
 
 		restore_sprs(thread);
-		restore_float(thread);
-		restore_slb(thread);
+		restore_slb(&thread->slbcache);
 	}
 
 	lock_acquire(&thread->lock);
+
+	/* Make sure TCA is fully up-to-date on the new thread's state */
+	sync_thread_to_tca(thread, tca);
 
 	if (thread->state == CT_STATE_OFFLINE) {
 		assert(0, "this should never happen\n");

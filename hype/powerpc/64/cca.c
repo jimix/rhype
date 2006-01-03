@@ -105,23 +105,7 @@ cpu_idle(void)
 
 	new_thread = &cca->active_cpu->thread[tca->thread_index];
 
-	tca->old_thread = tca->active_thread;
-	if (new_thread != tca->active_thread && tca->active_thread) {
-		save_sprs(tca->active_thread);
-		save_slb(tca->active_thread);
-		save_float(tca->active_thread);
-	}
-
-
-	/* update the struct cpu_thread binding */
-	tca->active_thread = new_thread;
-
-
-#ifdef FORCE_APPLE_MODE
-	sync_thread_to_tca(tca->active_thread, tca);
-#endif
-
-	resume_thread();
+	resume_thread(new_thread);
 }
 
 uval
