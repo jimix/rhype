@@ -30,7 +30,6 @@
 #include <io.h>
 #include <bitops.h>
 
-
 #define SPRN_HSPRG0	304
 #define SPRN_HSPRG1	305
 #define SPRN_HDEC	310
@@ -168,6 +167,21 @@ gdb_read_reg_array(struct cpu_state *state, char *buf)
 	buf += sizeof (state->xer) * 2;
 }
 
+#define GET_FP_REG(i)							\
+	case i :{							\
+		uval64 reg = 0xdeadbeefdeadbeef;			\
+		register uval64 *preg asm("r10");			\
+		uval64 msr = mfmsr();					\
+		if (msr & MSR_FP) {					\
+			preg = &reg;					\
+			asm volatile ("stfd %1, 0(%0)\n\t"		\
+				      :: "g" (preg), "i" (i-32));	\
+		}							\
+		write_to_packet_hex(reg, sizeof (uval64) * 2);		\
+		break;							\
+		}
+
+
 void __gdbstub
 gdb_read_register(struct cpu_state *state, int id)
 {
@@ -177,16 +191,6 @@ gdb_read_register(struct cpu_state *state, int id)
 				    sizeof(state->gpr[id]) * 2);
 		break;
 
-#define GET_FP_REG(i)							\
-	case i :{							\
-		uval64 reg;						\
-		register uval64 *preg asm("r10");			\
-		preg = &reg;						\
-		asm volatile ("stfd %1, 0(%0)\n\t"			\
-			      :: "g" (preg), "i" (i-32));		\
-		write_to_packet_hex(reg, sizeof (uval64) * 2);		\
-		break;							\
-		}							\
 
 	GET_FP_REG(32);
 	GET_FP_REG(33);
@@ -442,12 +446,32 @@ matched:
 }
 
 
-static struct gdb_monitor_task gdb_show_spr = {
+static uval __gdbstub
+__gdb_show_slb(const char *cmd)
+{
+	(void)cmd;
+	struct slb_cache slbc;
+	hprintf("Cached SLB:\n");
+	save_slb(&slbc);
+	hprintf("HW SLB:\n");
+	slb_dump(&slbc);
+	return 0;
+}
+
+
+
+static struct gdb_monitor_task gdb_show_slb = {
 	.gdb_mt_next = NULL,
+	.gdb_mt_name = "show_slb",
+	.gdb_mt_fn = __gdb_show_slb,
+};
+
+
+static struct gdb_monitor_task gdb_show_spr = {
+	.gdb_mt_next = &gdb_show_slb,
 	.gdb_mt_name = "show_spr",
 	.gdb_mt_fn = __gdb_show_spr,
 };
-
 
 struct gdb_functions gdb_functions = {
 	.write_to_mem = gdb_write_mem,
