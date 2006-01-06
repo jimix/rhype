@@ -40,10 +40,9 @@
 #define SPRN_LPCR	318
 #define SPRN_LPIDR	319
 
-char gdb_stack[PGSIZE] __attribute__ ((aligned(PGSIZE)));
+//char gdb_stack[PGSIZE * MAX_CPU] __attribute__ ((aligned(PGSIZE)));
 
-struct cpu_state *gdb_currdbg =
-	(struct cpu_state *)(((char *)gdb_stack) + sizeof (gdb_stack));
+//struct cpu_state *gdb_currdbg = (struct cpu_state *)(((char *)gdb_stack));
 
 extern uval32 trap_instruction[];
 
@@ -382,6 +381,9 @@ gdb_write_mem(struct cpu_state *state, char *mem, uval len, const char *buf)
 	return len;
 }
 
+
+extern uval32 mfspr_loc;
+
 static uval __gdbstub
 __gdb_show_spr(const char *cmd)
 {
@@ -425,6 +427,24 @@ __gdb_show_spr(const char *cmd)
 	CHECK_SPR(HID8);
 	CHECK_SPR(PIR);
 
+	val = str2uval(spr,16);
+	hprintf("get spr: %lx '%s' %p\n", val, spr, &mfspr_loc);
+	if (val > 0) {
+		val = (val >> 5) | ((val & 31)<<5);
+
+		mfspr_loc = ~(((1<<10)-1) << 11) & mfspr_loc;
+		mfspr_loc = ((val & ((1<<10)-1)) << 11) | mfspr_loc;
+		hw_dcache_flush(ALIGN_DOWN((uval)&mfspr_loc, CACHE_LINE_SIZE));
+		hprintf("executing: %x %p\n", mfspr_loc, &mfspr_loc);
+
+		asm volatile ("mfspr_loc:	mfspr %0, %1;\n\t"
+			      : "=&r" (val) : "i" (0));
+
+
+		hprintf("spr: %lx\n", val);
+		goto matched;
+	}
+
 	write_to_packet("O");
 	encode_to_packet("Unknown SPR\n", -1);
 	send_packet();
@@ -458,7 +478,11 @@ __gdb_show_slb(const char *cmd)
 	return 0;
 }
 
-
+static uval __gdbstub
+gdb_get_thread_id()
+{
+	return mfpir();
+}
 
 static struct gdb_monitor_task gdb_show_slb = {
 	.gdb_mt_next = NULL,
@@ -474,6 +498,7 @@ static struct gdb_monitor_task gdb_show_spr = {
 };
 
 struct gdb_functions gdb_functions = {
+	.get_thread_id = gdb_get_thread_id,
 	.write_to_mem = gdb_write_mem,
 	.write_to_packet = gdb_write_to_packet_mem,
 	.read_register = gdb_read_register,
