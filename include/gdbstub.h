@@ -65,6 +65,7 @@ struct gdb_monitor_task
 
 struct gdb_functions
 {
+	uval (*get_thread_id)();
 	uval (*write_to_packet)(struct cpu_state *state,
 				const char *mem, uval len);
 	uval (*write_to_mem)(struct cpu_state *state, char *mem,

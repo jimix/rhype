@@ -57,4 +57,6 @@ endif
 strstr.o: CC_WARN += -Wno-cast-qual
 strchr.o: CC_WARN += -Wno-cast-qual
 
+gdbstub.o: HOST_CFLAGS+=-O2
+
 CLEAN_FILES += libhype.a

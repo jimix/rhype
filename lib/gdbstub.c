@@ -30,6 +30,8 @@
 #include <io_chan.h>
 #include <hcall.h>
 
+#define ANY_THREAD	-1
+static sval active_thread = ANY_THREAD;
 static uval active = 0;
 static uval connected = 0;
 static char in_buf[PGSIZE];
@@ -41,8 +43,30 @@ static uval in_bytes = 0;	/* how much on in_buf is full */
 static uval read_bytes = 0;	/* how much of in_buf has been read */
 
 static uval out_acked = 0;
+static lock_t gdb_lock = lock_unlocked;
 
 volatile struct cpu_state *current_state = NULL;
+
+static inline uval __gdbstub gdb_is_active()
+{
+	return active;
+}
+
+void
+__lock_acquire(lock_t *lock)
+{
+	int x = 0;
+	int s = 0;
+
+	while ((x < (1<<20)) || gdb_is_active()) {
+		s = lock_tryacquire(lock);
+		if (s) return;
+		++x;
+	}
+	hprintf_nlk("DEADLOCK: %p\n", lock);
+	breakpoint();
+}
+
 
 
 void
@@ -283,12 +307,48 @@ gdb_register_lib_monitors()
 	gdb_functions.monitor_list = &stub_debug;
 }
 
+int enable_threads = 1;
+static void report_signal_thread(int sig, int thr)
+{
+	if (enable_threads && sig >= 0) {
+		write_to_packet("T");
+		write_to_packet_hex(sig, 2);
+		write_to_packet("thread:");
+		write_to_packet_hex(thr,0);
+		write_to_packet(";");
+	} else {
+		write_to_packet("S");
+		write_to_packet_hex(sig, 2);
+	}
+}
 
 struct cpu_state *__gdbstub
 enter_gdb(struct cpu_state *state, uval exception_type)
 {
 	uval signum;
 	uval initial_connect = 0;
+	sval curr_thread = 1;
+	sval old_thread = ANY_THREAD;
+	sval set_thread;
+
+	if (enable_threads && gdb_functions.get_thread_id) {
+		curr_thread = gdb_functions.get_thread_id() + 1;
+	}
+
+	set_thread = curr_thread;
+	hprintf("Thread settings: %lx %ld\n", curr_thread, active_thread);
+
+	do {
+		if (active_thread == curr_thread) break;
+		if (active_thread == ANY_THREAD) {
+			set_thread = ANY_THREAD;
+		} else {
+			set_thread = curr_thread;
+		}
+		old_thread = active_thread;
+	} while (!cas_uval(&active_thread, set_thread, curr_thread));
+
+	lock_acquire(&gdb_lock);
 
 	gdb_enter_notify(exception_type);
 
@@ -319,8 +379,7 @@ enter_gdb(struct cpu_state *state, uval exception_type)
 	 */
 	if (initial_connect < 2) {
 		reset_out_buf();
-		write_to_packet("S");
-		write_to_packet_hex(signum, 2);
+		report_signal_thread(signum, curr_thread);
 		send_packet();
 	}
 
@@ -332,11 +391,14 @@ enter_gdb(struct cpu_state *state, uval exception_type)
 		reset_out_buf();
 		switch (packet[0]) {
 		case '?':	/* query signal number */
-			write_to_packet("S");
-			write_to_packet_hex(signum, 2);
+			report_signal_thread(signum, curr_thread);
 			send_packet();
 			break;
 		case 'H':	/* thread operations */
+			old_thread = str2uval(packet + 2, sizeof(uval));
+			if (old_thread <= 0) {
+				old_thread = ANY_THREAD;
+			}
 			write_to_packet("OK");
 			send_packet();
 			break;
@@ -467,6 +529,14 @@ enter_gdb(struct cpu_state *state, uval exception_type)
 		case 'q':{
 			char tmp[256];
 			uval ret;
+			if (packet[1] == 'C') {
+				if (curr_thread < 0) {
+					goto null_reply;
+				}
+				write_to_packet_hex(curr_thread, 0);
+			}
+
+
 			if (memcmp(packet, "qRcmd," ,6) != 0 ||
 			    gdb_functions.monitor_list == NULL) {
 				write_to_packet("");
@@ -507,6 +577,7 @@ enter_gdb(struct cpu_state *state, uval exception_type)
 
 
 		default:
+null_reply:
 			write_to_packet("");
 			send_packet();
 			break;
@@ -514,6 +585,8 @@ enter_gdb(struct cpu_state *state, uval exception_type)
 	}
 done:
 	active = 0;
+	lock_release(&gdb_lock);
+	active_thread = old_thread;
 	return state;
 }
 
