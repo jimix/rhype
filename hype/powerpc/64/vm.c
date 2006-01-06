@@ -35,10 +35,13 @@
 #include <htab.h>
 #include <htab_inlines.h>
 
+static lock_t tlbie_lock = lock_unlocked;
+
 void
 do_tlbie(union pte *pte, uval ptex)
 {
 	uval64 virtualAddress;
+	lock_acquire(&tlbie_lock);
 
 	virtualAddress = vpn_from_pte(pte, ptex >> LOG_NUM_PTES_IN_PTEG) << 12;
 	if (pte->bits.l) {
@@ -51,6 +54,8 @@ do_tlbie(union pte *pte, uval ptex)
 	eieio();
 	tlbsync();
 	ptesync();
+	lock_release(&tlbie_lock);
+
 }
 
 void
