@@ -25,7 +25,7 @@
 #include <os.h>
 #include <asm_defs.h>
 #include <hypervisor.h>
-
+#include <mmu_defs.h>
 #define SAVE_REGISTER(rn) \
 	STR rn,CT_GPRS+(REG_WIDTH*(rn))(r14)
 
@@ -56,7 +56,6 @@
  * r14-r16 were used since hcalls use r3-r8, and
  * r0-r2 have special meanings later when we call c code
  */
-
 	
 #define HYPE_COMMON_PROLOG(vector) \
         mtspr SPRN_HSPRG1, r13; \
@@ -90,8 +89,11 @@
 
 #define TRAP_PRE(vec) \
 	mtspr	SPRN_HSPRG1, r1; \
-	LOADADDR(r1, gdb_currdbg); \
-	LDR	r1, 0(r1); \
+	mfpir	r1		; \
+	mulli	r1, r1, 1<<LOG_PGSIZE ; \
+	addi	r1, r1, 1<<LOG_PGSIZE	; \
+	addis	r1, r1, gdb_stack@h ; \
+	addi	r1, r1, gdb_stack@l ; /* r1 = gdb_stack (1 + cpu) * PGSIZE*/  \
 	subi	r1, r1, GDB_CPU_STATE_SIZE; \
 	SAVE_2GPR(r1, r2); \
 	mfctr	r2; \
@@ -114,7 +116,6 @@ r3save:					# need something else for SMP...
 	.space 0xc8-(DOT-hype_vec)
 os_save:
 	.space 0x8
-
 	. = 0x100	# System Reset
 C_TEXT_ENTRY(sys_reset)
 ### FIXME:	Need code here to detect if we are here for thread
@@ -441,7 +442,7 @@ call_vec:
 	/* The ABI wants the parameter on R11 to be on the stack */
 	STR r11, 112(r1)
 	CALL_CFUNC(r12)
-
+	
 return_preempt:
 	lbz r15,CT_PREEMPT(r14)
 	CMPI r15,0
@@ -504,7 +505,7 @@ return_no_preempt:
 	RESTORE_REGISTER(r13)
 	RESTORE_REGISTER(r14)
 	RFID
-	
+
 not_vec0:
 	andi. r12,r3,0x7000
 	cmpi cr0,r12,0x6000
@@ -614,7 +615,12 @@ ex_gdb_save:
 
 	.long 0
 
-
 GLBL_LABEL(trap_instruction)
 	tw	31,0,0
+
+	.data
+gdb_stack:	
+	.space MAX_CPU * (1<<LOG_PGSIZE)
+gdb_stack_end:	
+			
 #endif
