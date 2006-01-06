@@ -131,7 +131,7 @@ static uval cca_table_size;
 uval
 cca_table_init(uval n)
 {
-	cca_table = halloc(n * sizeof (cca_table));
+	cca_table = halloc(n * sizeof (struct cpu_control_area*));
 	assert(cca_table != NULL, "failed to alloc tca_table\n");
 
 	cca_table_size = n;
