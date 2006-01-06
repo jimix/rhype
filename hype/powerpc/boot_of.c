@@ -446,7 +446,7 @@ probe_serial(phandle node, uval32 phys_size)
 
 	serial_node = node;
 
-	serial_init_fn = init_fn;
+	set_serial_init_fn(init_fn);
 
 	c = (*init_fn) (io_addr, clock, baudrate);
 
@@ -949,6 +949,7 @@ boot_cpu_start(uval ofd, phandle nodeid, uval cpuno, uval cpuseq)
 	*((uval *)stack) = 0;
 
 	ret = call_of("start-cpu", 3, 0, NULL, nodeid, boot_cpu_leap, &ci);
+
 	if (ret != OF_SUCCESS) {
 		return 0;
 	}
@@ -986,6 +987,7 @@ boot_cpus(uval ofd)
 
 	cn = c1;
 	cpus = 0;
+
 	while (cn > 0 && cpus < MAX_CPU) {
 		phandle cp;
 		const char *path;
