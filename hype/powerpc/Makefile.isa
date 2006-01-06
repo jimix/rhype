@@ -59,7 +59,7 @@ ifeq ($(ENABLE_APPLE_MODE), yes)
 OBJECTS += h_set_spr.o
 endif
 
-
+boot_smp.o: HOST_CFLAGS+=-O2
 # add the build dir
 HOST_PRE_CPPDIRS += -I.
 
