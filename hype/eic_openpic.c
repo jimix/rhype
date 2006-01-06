@@ -252,10 +252,9 @@ extern sval
 static struct cpu_thread *
 __openpic_do_exception(struct cpu_thread *thread)
 {
-	int count = 0;
 	struct cpu_thread *curr = thread;
 	union op_int_ack op_vec;
-
+	int cpu = get_proc_id();
 
 	/* assume there is no thread for the interrupt */
 	thread = NULL;
@@ -263,15 +262,15 @@ __openpic_do_exception(struct cpu_thread *thread)
 	xirr_t xirr;
 	int h;
 
-	op_vec.word = read_reg(&openpic->cpu_specific[0].intr_ack);
+	op_vec.word = read_reg(&openpic->cpu_specific[cpu].intr_ack);
 	xirr = xirr_encode(op_vec.bits.vector, XIRR_CLASS_HWDEV);
 
 	/* BAD!!!!! Assume spurious vector is 255 */
-	if (op_vec.bits.vector == 255)
-		return curr;
-
-	++count;
-	h = xir_raise(xirr, &thread);
+	if (op_vec.bits.vector == 255) {
+		h = -1;
+	} else {
+		h = xir_raise(xirr, &thread);
+	}
 
 	/*write_reg(&openpic->cpu_specific[0].eoi, 0);*/
 
