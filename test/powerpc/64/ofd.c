@@ -380,6 +380,7 @@ ofd_cpus_props(void *m, struct partition_status *ps)
 	uval32 val = 1;
 	ofdn_t n;
 	ofdn_t c;
+	int count = 1;
 	static uval32 ibm_pft_size[] = { 0x0, 0x0 };
 
 	n = ofd_node_find(m, path);
@@ -424,7 +425,10 @@ ofd_cpus_props(void *m, struct partition_status *ps)
 			ofdn_t nc;
 
 			nc = ofd_node_find_next(m, c);
-			ofd_node_prune(m, c);
+			if (count >= MAX_CPU) {
+				ofd_node_prune(m, c);
+				++count;
+			}
 
 			c = nc;
 		}
@@ -558,7 +562,7 @@ ofd_chosen_props(void *m)
 	ofdn_t n;
 	ofdn_t p;
 	static const char path[] = "/chosen";
-	static const char console[] = " console=hvc nosmp";
+	static const char console[] = " console=hvc       ";
 	char b[513];
 	uval sz = 0;
 
