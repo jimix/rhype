@@ -52,6 +52,11 @@ static inline uval __gdbstub gdb_is_active()
 	return active;
 }
 
+#if 0
+/* An alternate lock acquisition routine that tries to detect deadlocks.
+ * Inside the hypervisor, there's no reason why any lock should be held
+ * for any substantial period of time.
+ */
 void
 __lock_acquire(lock_t *lock)
 {
@@ -66,7 +71,7 @@ __lock_acquire(lock_t *lock)
 	hprintf_nlk("DEADLOCK: %p\n", lock);
 	breakpoint();
 }
-
+#endif
 
 
 void

@@ -76,22 +76,8 @@ lock_init(lock_t *lock)
 	*lock = lock_unlocked;
 }
 
-
-extern void __lock_acquire(lock_t *lock);
-
-
 static inline void
 lock_acquire(lock_t *lock)
-{
-	if (!cas_uval32(lock, lock_unlocked, ~lock_unlocked)) {
-		__lock_acquire(lock);
-		return;
-	}
-	sync_after_acquire();
-}
-
-static inline void
-old_lock_acquire(lock_t *lock)
 {
 	while (!cas_uval32(lock, lock_unlocked, ~lock_unlocked)) {
 		continue;
