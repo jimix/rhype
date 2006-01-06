@@ -30,6 +30,13 @@ imp_thread_init(struct cpu_thread *thread)
 	uval size = thread->cpu->os->rmo_size;
 
 	thread->imp_regs.hid4.word = get_hid4();
+
+	/* Force this to 0, so that the first time imp_switch_thread
+	 * runs it will be forced to write hid4 -- since it will
+	 * detect a hid4 change
+	 */
+	thread->imp_regs.hid4.bits.rmor = 0;
+
 	if (base != INVALID_PHYSICAL_ADDRESS) {
 		assert(cpu_verify_rmo(base, size), "Invalid rmo, rmo size\n");
 
