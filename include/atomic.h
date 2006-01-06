@@ -31,22 +31,24 @@ static inline uval
 atomic_add(volatile uval *value, uval add)
 {
 	uval old;
-
+	uval val;
 	do {
 		old = *value;
-	} while (!cas_uval(value, old, old + add));
-	return old + add;
+		val = old + add;
+	} while (!cas_uval(value, old, val));
+	return val;
 }
 
 static inline uval32
 atomic_add32(uval32 *value, uval32 add)
 {
 	uval32 old;
-
+	uval32 val;
 	do {
 		old = *value;
-	} while (!cas_uval32(value, old, old + add));
-	return old + add;
+		val = old + add;
+	} while (!cas_uval32(value, old, val));
+	return val;
 }
 
 static inline uval
@@ -74,8 +76,22 @@ lock_init(lock_t *lock)
 	*lock = lock_unlocked;
 }
 
+
+extern void __lock_acquire(lock_t *lock);
+
+
 static inline void
 lock_acquire(lock_t *lock)
+{
+	if (!cas_uval32(lock, lock_unlocked, ~lock_unlocked)) {
+		__lock_acquire(lock);
+		return;
+	}
+	sync_after_acquire();
+}
+
+static inline void
+old_lock_acquire(lock_t *lock)
 {
 	while (!cas_uval32(lock, lock_unlocked, ~lock_unlocked)) {
 		continue;
@@ -174,14 +190,20 @@ read_lock_release(rw_lock_t *lock)
 /* These operations assume that we're trying to use a single bit
  * in a 32 bit uval as a lock bit.
  * "val" is the bitmask representing this bit */
+extern void hpanic(const char *buf) __attribute__ ((no_instrument_function));
 static inline uval32
 lockbit(uval32 *value, uval32 val)
 {
 	uval32 old;
+	uval count = 0;
 	do {
 		old = *value;
 		old &= ~val;
 
+		++count;
+		if (count > (1<<20)){
+			hpanic("lockbit");
+		}
 		/* Now atomically ensure the bit is set */
 	} while (!cas_uval32(value, old, old | val));
 	sync_after_acquire();
@@ -192,11 +214,16 @@ static inline uval32
 unlockbit(uval32 *value, uval32 val)
 {
 	uval32 old;
+	uval count = 0;
 	sync_before_release();
 	do {
 		old = *value;
 		old &= ~val;
 
+		++count;
+		if (count > (1<<20)){
+			hpanic("lockbit");
+		}
 		/* Now atomically ensure the bit is cleared */
 	} while (!cas_uval32(value, old | val, old));
 	return old;
