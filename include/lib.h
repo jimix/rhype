@@ -52,11 +52,14 @@ extern int vsnprintf(char *buf, size_t size, const char *fmt, va_list ap);
 
 extern sval hprintf(const char *fmt, ...)
 	__attribute__ ((format(printf, 1, 2), no_instrument_function));
+extern sval hprintf_nlk(const char *fmt, ...)
+	__attribute__ ((format(printf, 1, 2), no_instrument_function));
 extern sval vhprintf(const char *fmt, va_list ap)
 	__attribute__ ((no_instrument_function));
 extern sval _vhprintf(const char *fmt, va_list ap, int lk)
 	__attribute__ ((no_instrument_function));
 extern void hputs(const char *buf) __attribute__ ((no_instrument_function));
+extern void hpanic(const char *buf) __attribute__ ((no_instrument_function));
 
 
 extern struct io_chan *hout_set(struct io_chan *out);
