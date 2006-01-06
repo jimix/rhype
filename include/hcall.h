@@ -98,7 +98,8 @@ extern sval hcall_vterm_partner_info(uval *retvals, uval ua, uval plpid,
 extern sval hcall_free_vterm(uval *retvals, uval uaddr);
 
 extern sval hcall_thread_control(uval *retvals, uval flags,
-				 uval thread_num, uval start_addr);
+				 uval thread_num, uval start_addr, uval r3,
+				 uval r4);
 extern sval hcall_cede(uval *retvals);
 extern sval hcall_page_init(uval *retvals, uval flags,
 			    uval destination, uval source);
