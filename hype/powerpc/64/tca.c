@@ -31,6 +31,7 @@
 #include <objalloc.h>
 #include <vdec.h>
 #include <cpu_thread_inlines.h>
+#include <atomic.h>
 
 void
 save_sprs(struct cpu_thread *thread)
@@ -94,11 +95,20 @@ restore_sprs(struct cpu_thread *thread)
 	}
 }
 
+static volatile uval hold_thread = 0;
+static volatile uval holding_threads = 0;
+
 struct cpu_thread *
 preempt_thread(struct cpu_thread *thread, uval timer)
 {
 	struct thread_control_area *tca = get_tca();
 	int preempt_cpu = 0;
+	int thr_idx = get_tca_index();
+
+	/* This lets us hold threads here by setting hold_thread from gdb */
+	holding_threads |= (1ULL << thr_idx);
+	while (hold_thread & (1ULL << thr_idx));
+	holding_threads &= ~(1ULL<<thr_idx);
 
 #ifdef FORCE_APPLE_MODE
 	/* Update the vdec for the thread, figuring out how much
@@ -493,7 +503,7 @@ static uval tca_table_size;
 uval
 tca_table_init(uval n)
 {
-	tca_table = halloc(n * sizeof (tca_table));
+	tca_table = halloc(n * sizeof (struct thread_control_area*));
 	assert(tca_table != NULL, "failed to alloc tca_table\n");
 
 	tca_table_size = n;
