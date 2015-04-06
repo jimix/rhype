@@ -1,0 +1,2 @@
+The IBM Research Hypervisor Project is a software package designed specifically to perform and support Hypervisor Research and push the boundaries of all aspects of virtualizing a machine.
+This repository has been created so that the code, which is largely unsupported at this time, is available for other developers and researchers.
